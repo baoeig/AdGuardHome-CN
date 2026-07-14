@@ -47,4 +47,5 @@ jobs:
             dist/*.tar.gz
             dist/*.zip
             dist/checksums.txt
+            dist/version.json
           generate_release_notes: true
