@@ -35,7 +35,7 @@ jobs:
           restore-keys: ${{ runner.os }}-go-
 
       - name: Build Release
-        run: make SIGN=0 VERBOSE=1 VERSION="${GITHUB_REF_NAME}" build-release
+        run: make SIGN=0 VERBOSE=1 CHANNEL="release" VERSION="${GITHUB_REF_NAME}" build-release
         env:
           GO111MODULE: on
 
