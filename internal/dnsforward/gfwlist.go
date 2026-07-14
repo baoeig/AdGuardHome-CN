@@ -422,9 +422,15 @@ func (m *gfwlistManager) applyToUpstreamConfig(
 	if uc.DomainReservedUpstreams == nil {
 		uc.DomainReservedUpstreams = make(map[string][]upstream.Upstream)
 	}
+	if uc.SpecifiedDomainUpstreams == nil {
+		uc.SpecifiedDomainUpstreams = make(map[string][]upstream.Upstream)
+	}
 
 	for d, ups := range gfwUC.DomainReservedUpstreams {
 		uc.DomainReservedUpstreams[d] = append(uc.DomainReservedUpstreams[d], ups...)
+	}
+	for d, ups := range gfwUC.SpecifiedDomainUpstreams {
+		uc.SpecifiedDomainUpstreams[d] = append(uc.SpecifiedDomainUpstreams[d], ups...)
 	}
 
 	m.logger.InfoContext(
