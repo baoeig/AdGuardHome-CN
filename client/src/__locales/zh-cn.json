@@ -780,7 +780,7 @@
   "gfwlist_update_error": "更新 GFW 列表失败：{{error}}",
   "gfwlist_custom_domains": "自定义域名",
   "gfwlist_custom_domains_desc": "添加额外的域名，使其也通过 GFW 列表的上游 DNS 服务器进行解析（不依赖 GFW 列表本身）。",
-  "gfwlist_custom_domains_hint": "输入域名，可用逗号、空格或换行分隔多个域名。",
+  "gfwlist_custom_domains_hint": "每行输入一条规则。支持普通域名、通配符、Adblock 域名规则、URL 规则和 Hosts 文件行。",
   "gfwlist_no_custom_domains": "尚未添加自定义域名。",
   "gfwlist_add_domain": "添加",
   "gfwlist_domain_added": "域名添加成功",
@@ -791,5 +791,16 @@
   "gfwlist_domain_empty": "域名不能为空",
   "gfwlist_domain_need_dot": "域名必须包含至少一个点（例如 example.com）",
   "gfwlist_domain_is_ip": "不支持 IP 地址，请输入域名",
-  "gfwlist_domain_duplicate": "该域名已添加过"
+  "gfwlist_domain_duplicate": "该域名已添加过",
+  "gfwlist_example_plain": "通过 GFW 上游解析该域名及其所有子域名；",
+  "gfwlist_example_wildcard": "通过 GFW 上游解析 example.org 的所有子域名；",
+  "gfwlist_example_url": "从 URL 风格规则中提取主机名并进行分流。",
+  "gfwlist_check_title": "检查 GFW 列表分流",
+  "gfwlist_check_desc": "检查某个域名是否包含在 GFW 列表分流集合中。",
+  "gfwlist_checking": "检查中...",
+  "gfwlist_check_error": "检查 GFW 列表失败：{{error}}",
+  "gfwlist_check_matched": "{{domain}} 已包含在{{source}}中。",
+  "gfwlist_check_not_matched": "{{domain}} 不在 GFW 列表分流集合中。",
+  "gfwlist_check_source_gfwlist": "GFW 列表",
+  "gfwlist_check_source_custom": "自定义域名"
 }

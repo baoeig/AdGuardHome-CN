@@ -708,6 +708,8 @@ class Api {
 
     REMOVE_GFWLIST_DOMAINS = { path: 'gfwlist/domains/remove', method: 'POST' };
 
+    CHECK_GFWLIST_DOMAIN = { path: 'gfwlist/check', method: 'GET' };
+
     getGfwListStatus() {
         const { path, method } = this.GET_GFWLIST_STATUS;
 
@@ -736,6 +738,13 @@ class Api {
         const { path, method } = this.REMOVE_GFWLIST_DOMAINS;
 
         return this.makeRequest(path, method, { data: { domains } });
+    }
+
+    checkGfwListDomain(domain: string) {
+        const { path, method } = this.CHECK_GFWLIST_DOMAIN;
+        const url = getPathWithQueryString(path, { domain });
+
+        return this.makeRequest(url, method);
     }
 }
 

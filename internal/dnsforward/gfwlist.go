@@ -252,6 +252,31 @@ func extractDomainFromURLRule(line string) string {
 	return normalizeDomain(domain)
 }
 
+// normalizeGFWDomainRule normalizes a user-entered GFW list custom rule.  It
+// accepts plain domains, wildcard domains, common adblock-style domain rules,
+// URL rules, and simple hosts-file lines.
+func normalizeGFWDomainRule(rule string) (domain string) {
+	rule = strings.TrimSpace(rule)
+	if rule == "" {
+		return ""
+	}
+	if strings.HasPrefix(rule, "!") ||
+		strings.HasPrefix(rule, "#") ||
+		strings.HasPrefix(rule, "@@") ||
+		strings.HasPrefix(rule, "[") {
+		return ""
+	}
+
+	fields := strings.Fields(rule)
+	if len(fields) > 1 {
+		rule = fields[len(fields)-1]
+	}
+
+	rule = strings.TrimPrefix(rule, "*.")
+
+	return extractDomainFromAutoProxy(rule)
+}
+
 func extractDomainFromAutoProxy(line string) (domain string) {
 	// Skip empty lines, comments, exceptions, regexps and header.
 	if isIgnoredAutoProxyLine(line) {
@@ -357,6 +382,39 @@ func (m *gfwlistManager) allDomains() []string {
 	return result
 }
 
+// matchDomain returns true if domain exactly matches or is a subdomain of
+// pattern.
+func matchDomain(domain, pattern string) (ok bool) {
+	return domain == pattern || strings.HasSuffix(domain, "."+pattern)
+}
+
+// checkDomain returns true if domain is found in the GFW list or custom domain
+// list.  source is "gfwlist", "custom", or empty.
+func (m *gfwlistManager) checkDomain(domain string) (matched bool, source string) {
+	domain = normalizeDomain(domain)
+	if domain == "" {
+		return false, ""
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for d := range m.domains {
+		if matchDomain(domain, d) {
+			return true, "gfwlist"
+		}
+	}
+
+	for _, d := range m.conf.CustomDomains {
+		d = normalizeGFWDomainRule(d)
+		if d != "" && matchDomain(domain, d) {
+			return true, "custom"
+		}
+	}
+
+	return false, ""
+}
+
 // cachePath returns the path to the GFW list cache file.
 func (m *gfwlistManager) cachePath() string {
 	return filepath.Join(m.dataDir, gfwlistCacheFile)
@@ -385,6 +443,11 @@ func (m *gfwlistManager) loadFromCache(ctx context.Context) (err error) {
 
 // saveToCache saves the raw GFW list data to the local cache file.
 func (m *gfwlistManager) saveToCache(_ context.Context, data []byte) (err error) {
+	err = os.MkdirAll(m.dataDir, 0o700)
+	if err != nil {
+		return fmt.Errorf("creating cache dir: %w", err)
+	}
+
 	return os.WriteFile(m.cachePath(), data, 0o600)
 }
 

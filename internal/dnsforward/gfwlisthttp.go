@@ -53,6 +53,19 @@ type jsonGFWListDomainReq struct {
 	Domains []string `json:"domains"`
 }
 
+// jsonGFWListCheckResp is the JSON response for checking a domain against the
+// GFW list split-routing rules.
+type jsonGFWListCheckResp struct {
+	// Domain is the normalized domain that was checked.
+	Domain string `json:"domain"`
+
+	// Matched is true if the domain is in the GFW list or custom list.
+	Matched bool `json:"matched"`
+
+	// Source is "gfwlist", "custom", or empty.
+	Source string `json:"source"`
+}
+
 // handleGFWListStatus handles GET /control/gfwlist/status requests.
 func (s *Server) handleGFWListStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -188,7 +201,7 @@ func (s *Server) handleGFWListAddDomains(w http.ResponseWriter, r *http.Request)
 	}
 
 	for _, d := range req.Domains {
-		d = normalizeDomain(d)
+		d = normalizeGFWDomainRule(d)
 		if d == "" {
 			continue
 		}
@@ -228,13 +241,13 @@ func (s *Server) handleGFWListRemoveDomains(w http.ResponseWriter, r *http.Reque
 	if s.conf.GFWList != nil {
 		toRemove := make(map[string]struct{}, len(req.Domains))
 		for _, d := range req.Domains {
-			toRemove[normalizeDomain(d)] = struct{}{}
+			toRemove[normalizeGFWDomainRule(d)] = struct{}{}
 		}
 
 		s.conf.GFWList.CustomDomains = slices.DeleteFunc(
 			s.conf.GFWList.CustomDomains,
 			func(d string) bool {
-				_, ok := toRemove[normalizeDomain(d)]
+				_, ok := toRemove[normalizeGFWDomainRule(d)]
 
 				return ok
 			},
@@ -251,6 +264,37 @@ func (s *Server) handleGFWListRemoveDomains(w http.ResponseWriter, r *http.Reque
 	}
 
 	aghhttp.WriteJSONResponseOK(ctx, s.logger, w, r, &struct{}{})
+}
+
+// handleGFWListCheck handles GET /control/gfwlist/check requests.
+func (s *Server) handleGFWListCheck(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	domain := normalizeGFWDomainRule(r.URL.Query().Get("domain"))
+	if domain == "" {
+		aghhttp.WriteJSONResponseError(ctx, s.logger, w, r, fmt.Errorf("invalid domain"))
+
+		return
+	}
+
+	s.serverLock.RLock()
+	gfwMgr := s.gfwlist
+	s.serverLock.RUnlock()
+
+	if gfwMgr == nil {
+		aghhttp.WriteJSONResponseOK(ctx, s.logger, w, r, &jsonGFWListCheckResp{
+			Domain: domain,
+		})
+
+		return
+	}
+
+	matched, source := gfwMgr.checkDomain(domain)
+	aghhttp.WriteJSONResponseOK(ctx, s.logger, w, r, &jsonGFWListCheckResp{
+		Domain:  domain,
+		Matched: matched,
+		Source:  source,
+	})
 }
 
 // registerGFWListHandlers registers the GFW list HTTP API handlers.
@@ -273,5 +317,8 @@ func (s *Server) registerGFWListHandlers() {
 	)
 	s.conf.HTTPReg.Register(
 		http.MethodPost, "/control/gfwlist/domains/remove", s.handleGFWListRemoveDomains,
+	)
+	s.conf.HTTPReg.Register(
+		http.MethodGet, "/control/gfwlist/check", s.handleGFWListCheck,
 	)
 }

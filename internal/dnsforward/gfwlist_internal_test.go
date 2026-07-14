@@ -134,6 +134,72 @@ func TestNormalizeDomain(t *testing.T) {
 	}
 }
 
+func TestNormalizeGFWDomainRule(t *testing.T) {
+	testCases := []struct {
+		name string
+		rule string
+		want string
+	}{{
+		name: "plain",
+		rule: "example.org",
+		want: "example.org",
+	}, {
+		name: "wildcard",
+		rule: "*.example.org",
+		want: "example.org",
+	}, {
+		name: "adblock",
+		rule: "||example.org^",
+		want: "example.org",
+	}, {
+		name: "url",
+		rule: "|https://www.example.org/path",
+		want: "www.example.org",
+	}, {
+		name: "hosts",
+		rule: "127.0.0.1 example.org",
+		want: "example.org",
+	}, {
+		name: "comment",
+		rule: "! example.org",
+		want: "",
+	}, {
+		name: "exception",
+		rule: "@@||example.org^",
+		want: "",
+	}, {
+		name: "ip",
+		rule: "8.8.8.8",
+		want: "",
+	}}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, normalizeGFWDomainRule(tc.rule))
+		})
+	}
+}
+
+func TestGFWListManagerCheckDomain(t *testing.T) {
+	conf := &GFWListConfig{
+		CustomDomains: []string{"custom.example.net"},
+	}
+	m := newGFWListManager(testLogger, conf, t.TempDir())
+	m.domains["example.org"] = struct{}{}
+
+	matched, source := m.checkDomain("sub.example.org")
+	assert.True(t, matched)
+	assert.Equal(t, "gfwlist", source)
+
+	matched, source = m.checkDomain("custom.example.net")
+	assert.True(t, matched)
+	assert.Equal(t, "custom", source)
+
+	matched, source = m.checkDomain("other.example.net")
+	assert.False(t, matched)
+	assert.Empty(t, source)
+}
+
 func TestParseGFWList(t *testing.T) {
 	// Simulate a small base64-encoded AutoProxy list.
 	rawContent := `[AutoProxy 0.2.9]

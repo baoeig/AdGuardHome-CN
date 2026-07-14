@@ -1,14 +1,11 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useDispatch } from 'react-redux';
 
 import Card from '../../ui/Card';
 import PageTitle from '../../ui/PageTitle';
 import Loading from '../../ui/Loading';
 import { Checkbox } from '../../ui/Controls/Checkbox';
-import Check, { FilteringCheckFormValues } from '../../Filters/Check';
 import apiClient from '../../../api/Api';
-import { checkHost } from '../../../actions/filtering';
 
 interface GfwListStatus {
     enabled: boolean;
@@ -17,6 +14,12 @@ interface GfwListStatus {
     custom_domains: string[];
     domain_count: number;
     update_interval: number;
+}
+
+interface GfwListCheckResult {
+    domain: string;
+    matched: boolean;
+    source: string;
 }
 
 const DEFAULT_STATUS: GfwListStatus = {
@@ -29,33 +32,66 @@ const DEFAULT_STATUS: GfwListStatus = {
 };
 
 /**
- * Validates a single domain string.  Returns an error i18n key or empty string
- * if valid.
+ * Normalizes a GFW custom rule to the domain it represents.  This intentionally
+ * mirrors the backend: plain domains, wildcard domains, common adblock domain
+ * rules, URL rules, and hosts-file lines are accepted.
  */
-const validateDomain = (
-    domain: string,
-    existingDomains: string[],
-): string => {
+const normalizeGfwDomainRule = (rule: string): string => {
+    let value = rule.trim().toLowerCase();
+    if (!value) {
+        return '';
+    }
+
+    const fields = value.split(/\s+/);
+    if (fields.length > 1) {
+        value = fields[fields.length - 1];
+    }
+
+    if (value.startsWith('!') || value.startsWith('#') || value.startsWith('@@') || value.startsWith('[')) {
+        return '';
+    }
+
+    if (value.startsWith('||')) {
+        value = value.slice(2);
+        const index = value.search(/[/^*]/);
+        if (index >= 0) {
+            value = value.slice(0, index);
+        }
+    } else if (value.startsWith('*.')) {
+        value = value.slice(2);
+    } else if (value.startsWith('.')) {
+        value = value.slice(1);
+    } else if (value.startsWith('|http://') || value.startsWith('|https://')) {
+        value = value.replace(/^\|https?:\/\//, '');
+        const index = value.search(/[/?:]/);
+        if (index >= 0) {
+            value = value.slice(0, index);
+        }
+    }
+
+    value = value.replace(/\.$/, '');
+
+    return value;
+};
+
+const validateDomainRule = (rule: string, existingDomains: string[]): string => {
+    const domain = normalizeGfwDomainRule(rule);
     if (!domain) {
         return 'gfwlist_domain_empty';
     }
 
-    // Must contain at least one dot.
     if (!domain.includes('.')) {
         return 'gfwlist_domain_need_dot';
     }
 
-    // Only allow valid domain characters.
     if (!/^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/.test(domain)) {
         return 'gfwlist_domain_invalid';
     }
 
-    // Must not be an IP address (simple check).
     if (/^\d{1,3}(\.\d{1,3}){3}$/.test(domain)) {
         return 'gfwlist_domain_is_ip';
     }
 
-    // Duplicate check.
     if (existingDomains.includes(domain)) {
         return 'gfwlist_domain_duplicate';
     }
@@ -65,7 +101,6 @@ const validateDomain = (
 
 const GfwList = () => {
     const { t } = useTranslation();
-    const dispatch = useDispatch();
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -83,13 +118,15 @@ const GfwList = () => {
     // custom domain management
     const [newDomain, setNewDomain] = useState('');
     const [domainError, setDomainError] = useState('');
+    const [checkDomain, setCheckDomain] = useState('');
+    const [checkResult, setCheckResult] = useState<GfwListCheckResult | null>(null);
+    const [checkError, setCheckError] = useState('');
+    const [checking, setChecking] = useState(false);
 
     // Track live domain count separately so it updates immediately after
     // operations like "update list now" without waiting for a full status
     // fetch.
     const [liveDomainCount, setLiveDomainCount] = useState(0);
-
-    const domainInputRef = useRef<HTMLInputElement>(null);
 
     const showSuccess = (msg: string) => {
         setSuccessMsg(msg);
@@ -111,8 +148,10 @@ const GfwList = () => {
             setUrl(data.url || '');
             setUpstreamDns((data.upstream_dns || []).join('\n'));
             setUpdateInterval(data.update_interval || 86400);
+            return data;
         } catch (e: any) {
             showError(t('gfwlist_load_error', { error: e.message }));
+            return undefined;
         } finally {
             setLoading(false);
         }
@@ -156,8 +195,11 @@ const GfwList = () => {
             // Update domain count immediately from the response.
             setLiveDomainCount(newCount);
 
-            // Also refresh full status to keep everything in sync.
+            // Also refresh full status to keep everything in sync.  Keep the
+            // update response count afterwards, because it is the authoritative
+            // total immediately after a list update.
             await fetchStatus();
+            setLiveDomainCount(newCount);
 
             showSuccess(t('gfwlist_updated', { count: newCount }));
         } catch (e: any) {
@@ -171,10 +213,10 @@ const GfwList = () => {
         const raw = newDomain.trim();
         if (!raw) return;
 
-        // Support batch add: split by newlines, commas, spaces.
+        // Support batch add: one rule per line or comma-separated rules.
         const candidates = raw
-            .split(/[\n,\s]+/)
-            .map((d) => d.trim().toLowerCase())
+            .split(/[\n,]+/)
+            .map((d) => d.trim())
             .filter(Boolean);
 
         if (candidates.length === 0) return;
@@ -182,12 +224,13 @@ const GfwList = () => {
         // Validate each domain.
         const validDomains: string[] = [];
         const errors: string[] = [];
-        const currentDomains = status.custom_domains || [];
+        const currentDomains = (status.custom_domains || []).map((d) => normalizeGfwDomainRule(d)).filter(Boolean);
 
-        candidates.forEach((domain) => {
-            const err = validateDomain(domain, [...currentDomains, ...validDomains]);
+        candidates.forEach((rule) => {
+            const domain = normalizeGfwDomainRule(rule);
+            const err = validateDomainRule(rule, [...currentDomains, ...validDomains]);
             if (err) {
-                errors.push(`${domain}: ${t(err)}`);
+                errors.push(`${rule}: ${t(err)}`);
             } else {
                 validDomains.push(domain);
             }
@@ -235,18 +278,28 @@ const GfwList = () => {
         }
     };
 
-    const handleCheck = (values: FilteringCheckFormValues) => {
-        const params: FilteringCheckFormValues = { name: values.name };
+    const handleCheck = async (e: React.FormEvent) => {
+        e.preventDefault();
 
-        if (values.client) {
-            params.client = values.client;
+        const domain = normalizeGfwDomainRule(checkDomain);
+        const err = validateDomainRule(checkDomain, []);
+        if (err) {
+            setCheckResult(null);
+            setCheckError(t(err));
+            return;
         }
 
-        if (values.qtype) {
-            params.qtype = values.qtype;
+        setChecking(true);
+        setCheckError('');
+        try {
+            const data = await apiClient.checkGfwListDomain(domain);
+            setCheckResult(data);
+        } catch (error: any) {
+            setCheckResult(null);
+            setCheckError(t('gfwlist_check_error', { error: error.message }));
+        } finally {
+            setChecking(false);
         }
-
-        dispatch(checkHost(params));
     };
 
     if (loading) {
@@ -366,17 +419,17 @@ const GfwList = () => {
             {/* Custom domains card */}
             <Card title={t('gfwlist_custom_domains')} bodyType="card-body box-body--settings">
                 <div className="form__desc mb-3">{t('gfwlist_custom_domains_desc')}</div>
+                <div className="form__desc mb-3">{t('custom_filter_rules_hint')}</div>
 
                 <div className="form__desc form__desc--small mb-2">
                     {t('gfwlist_custom_domains_hint')}
                 </div>
 
-                <div className="input-group mb-3">
-                    <input
-                        ref={domainInputRef}
+                <div className="mb-3">
+                    <textarea
                         id="gfwlist-new-domain"
-                        type="text"
                         className={`form-control ${domainError ? 'is-invalid' : ''}`}
+                        rows={3}
                         value={newDomain}
                         onChange={(e) => {
                             setNewDomain(e.target.value);
@@ -390,17 +443,33 @@ const GfwList = () => {
                         }}
                         placeholder="example.com"
                     />
-                    <div className="input-group-append">
-                        <button
-                            id="gfwlist-add-domain"
-                            type="button"
-                            className="btn btn-outline-primary"
-                            onClick={handleAddDomain}
-                        >
-                            {t('gfwlist_add_domain')}
-                        </button>
-                    </div>
                     {domainError && <div className="invalid-feedback d-block">{domainError}</div>}
+                    <button
+                        id="gfwlist-add-domain"
+                        type="button"
+                        className="btn btn-outline-primary mt-2"
+                        onClick={handleAddDomain}
+                    >
+                        {t('gfwlist_add_domain')}
+                    </button>
+                </div>
+
+                <div className="list leading-loose mb-3">
+                    {t('examples_title')}:
+                    <ol className="leading-loose">
+                        <li>
+                            <code>example.org</code>: {t('gfwlist_example_plain')}
+                        </li>
+                        <li>
+                            <code>*.example.org</code>: {t('gfwlist_example_wildcard')}
+                        </li>
+                        <li>
+                            <code>||example.org^</code>: {t('example_meaning_filter_block')}
+                        </li>
+                        <li>
+                            <code>|https://www.example.org/path</code>: {t('gfwlist_example_url')}
+                        </li>
+                    </ol>
                 </div>
 
                 {status.custom_domains && status.custom_domains.length > 0 ? (
@@ -433,7 +502,52 @@ const GfwList = () => {
                 )}
             </Card>
 
-            <Check onSubmit={handleCheck} />
+            <Card title={t('gfwlist_check_title')} subtitle={t('gfwlist_check_desc')}>
+                <form onSubmit={handleCheck}>
+                    <div className="row">
+                        <div className="col-12 col-md-6">
+                            <label className="form__label" htmlFor="gfwlist-check-domain">
+                                {t('check_hostname')}
+                            </label>
+                            <input
+                                id="gfwlist-check-domain"
+                                type="text"
+                                className={`form-control ${checkError ? 'is-invalid' : ''}`}
+                                value={checkDomain}
+                                onChange={(e) => {
+                                    setCheckDomain(e.target.value);
+                                    setCheckError('');
+                                    setCheckResult(null);
+                                }}
+                                placeholder="example.com"
+                            />
+                            {checkError && <div className="invalid-feedback d-block">{checkError}</div>}
+
+                            <button
+                                className="btn btn-success btn-standard btn-large mt-3"
+                                type="submit"
+                                disabled={!checkDomain.trim() || checking}
+                            >
+                                {checking ? t('gfwlist_checking') : t('check')}
+                            </button>
+
+                            {checkResult && (
+                                <div
+                                    className={`alert mt-3 ${checkResult.matched ? 'alert-success' : 'alert-secondary'}`}
+                                    role="alert"
+                                >
+                                    {checkResult.matched
+                                        ? t('gfwlist_check_matched', {
+                                              domain: checkResult.domain,
+                                              source: t(`gfwlist_check_source_${checkResult.source}`),
+                                          })
+                                        : t('gfwlist_check_not_matched', { domain: checkResult.domain })}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </form>
+            </Card>
         </>
     );
 };
