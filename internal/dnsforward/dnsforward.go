@@ -153,6 +153,9 @@ type Server struct {
 	// initialization.  See [newIpsetHandler].
 	ipset *ipsetHandler
 
+	// gfwlist manages GFW list based DNS split routing.
+	gfwlist *gfwlistManager
+
 	// dns64Pref is the NAT64 prefix used for DNS64 response mapping.  The major
 	// part of DNS64 happens inside the [proxy] package, but there still are
 	// some places where response mapping is needed (e.g. DHCP).
@@ -531,6 +534,7 @@ func (s *Server) Prepare(ctx context.Context, conf *ServerConfig) (err error) {
 	s.setupAddrProc()
 
 	s.registerHandlers()
+	s.registerGFWListHandlers()
 
 	return nil
 }
@@ -660,6 +664,11 @@ func (s *Server) prepareInternalDNS(ctx context.Context) (err error) {
 	if err != nil {
 		// Don't wrap the error, because it's informative enough as is.
 		return err
+	}
+
+	// Apply GFW list domain routing after upstream settings are prepared.
+	if err = s.prepareGFWList(ctx); err != nil {
+		s.logger.WarnContext(ctx, "preparing gfwlist", slogutil.KeyError, err)
 	}
 
 	s.conf.PrivateRDNSUpstreamConfig, err = s.prepareLocalResolvers(ctx)

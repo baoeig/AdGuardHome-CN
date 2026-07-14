@@ -169,6 +169,11 @@ type Config struct {
 	// BootstrapPreferIPv6, if true, instructs the bootstrapper to prefer IPv6
 	// addresses to IPv4 ones for DoH, DoQ, and DoT.
 	BootstrapPreferIPv6 bool `yaml:"bootstrap_prefer_ipv6"`
+
+	// GFWList is the configuration for GFW list based DNS split routing.
+	// When enabled, domains matching the GFW list or custom domains will use
+	// the specified upstream DNS servers instead of the default ones.
+	GFWList *GFWListConfig `yaml:"gfwlist"`
 }
 
 // EDNSClientSubnet is the settings list for EDNS Client Subnet.
