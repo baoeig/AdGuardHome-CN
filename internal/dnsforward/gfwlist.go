@@ -100,7 +100,7 @@ func (m *gfwlistManager) start(ctx context.Context) {
 		interval = defaultGFWListUpdateInterval
 	}
 
-	go m.backgroundUpdater(interval)
+	go m.backgroundUpdater(context.WithoutCancel(ctx), interval)
 }
 
 // stop stops the background updater.
@@ -109,7 +109,7 @@ func (m *gfwlistManager) stop() {
 }
 
 // backgroundUpdater periodically updates the GFW list.
-func (m *gfwlistManager) backgroundUpdater(interval time.Duration) {
+func (m *gfwlistManager) backgroundUpdater(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -118,7 +118,6 @@ func (m *gfwlistManager) backgroundUpdater(interval time.Duration) {
 		case <-m.stopCh:
 			return
 		case <-ticker.C:
-			ctx := context.Background()
 			if err := m.update(ctx); err != nil {
 				m.logger.WarnContext(ctx, "updating gfwlist", slogutil.KeyError, err)
 			} else {
@@ -368,7 +367,7 @@ func (m *gfwlistManager) loadFromCache(ctx context.Context) (err error) {
 
 // saveToCache saves the raw GFW list data to the local cache file.
 func (m *gfwlistManager) saveToCache(_ context.Context, data []byte) (err error) {
-	return os.WriteFile(m.cachePath(), data, 0o644)
+	return os.WriteFile(m.cachePath(), data, 0o600)
 }
 
 // applyToUpstreamConfig adds GFW list domain routing rules to the given
