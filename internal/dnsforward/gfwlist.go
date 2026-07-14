@@ -80,22 +80,18 @@ func newGFWListManager(l *slog.Logger, conf *GFWListConfig, dataDir string) *gfw
 	}
 }
 
-// start loads the GFW list (from cache or network) and starts the background
-// updater.  It does not block.
+// start loads the GFW list from cache (if available) and starts the
+// background updater.  It does not block; network downloads are handled by
+// the background updater goroutine.
 func (m *gfwlistManager) start(ctx context.Context) {
-	// Try loading from cache first.
+	// Try loading from cache first so domains are available immediately.
 	if err := m.loadFromCache(ctx); err != nil {
 		m.logger.WarnContext(ctx, "loading gfwlist from cache", slogutil.KeyError, err)
 	}
 
-	// Try downloading from network.
-	if err := m.update(ctx); err != nil {
-		m.logger.WarnContext(ctx, "downloading gfwlist", slogutil.KeyError, err)
-	}
+	m.logger.InfoContext(ctx, "gfwlist loaded from cache", "domains", m.domainCount())
 
-	m.logger.InfoContext(ctx, "gfwlist loaded", "domains", m.domainCount())
-
-	// Start background updater.
+	// Start background updater — it will fetch from network on the first tick.
 	interval := time.Duration(m.conf.UpdateInterval)
 	if interval <= 0 {
 		interval = defaultGFWListUpdateInterval
@@ -109,8 +105,17 @@ func (m *gfwlistManager) stop() {
 	close(m.stopCh)
 }
 
-// backgroundUpdater periodically updates the GFW list.
+// backgroundUpdater downloads the GFW list once immediately, then repeats
+// on every interval tick.
 func (m *gfwlistManager) backgroundUpdater(ctx context.Context, interval time.Duration) {
+	// Do an immediate download so the list is fresh after (re)start,
+	// without waiting for the first full interval to elapse.
+	if err := m.update(ctx); err != nil {
+		m.logger.WarnContext(ctx, "updating gfwlist (initial)", slogutil.KeyError, err)
+	} else {
+		m.logger.InfoContext(ctx, "gfwlist updated (initial)", "domains", m.domainCount())
+	}
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 

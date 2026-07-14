@@ -4,8 +4,7 @@ import { useTranslation } from 'react-i18next';
 import Card from '../../ui/Card';
 import PageTitle from '../../ui/PageTitle';
 import Loading from '../../ui/Loading';
-
-const API_BASE = '/control/gfwlist';
+import apiClient from '../../../api/Api';
 
 interface GfwListStatus {
     enabled: boolean;
@@ -58,11 +57,9 @@ const GfwList = () => {
 
     const fetchStatus = async () => {
         try {
-            const res = await fetch(`${API_BASE}/status`);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data: GfwListStatus = await res.json();
+            const data: GfwListStatus = await apiClient.getGfwListStatus();
             setStatus(data);
-            setEnabled(data.enabled);
+            setEnabled(data.enabled ?? false);
             setUrl(data.url || '');
             setUpstreamDns((data.upstream_dns || []).join('\n'));
             setUpdateInterval(data.update_interval || 86400);
@@ -86,20 +83,13 @@ const GfwList = () => {
                 .map((s) => s.trim())
                 .filter(Boolean);
 
-            const res = await fetch(`${API_BASE}/config`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    enabled,
-                    url,
-                    upstream_dns: upstreams,
-                    update_interval: updateInterval,
-                }),
+            await apiClient.setGfwListConfig({
+                enabled,
+                url,
+                upstream_dns: upstreams,
+                update_interval: updateInterval,
             });
-            if (!res.ok) {
-                const body = await res.json().catch(() => ({}));
-                throw new Error(body.message || `HTTP ${res.status}`);
-            }
+
             await fetchStatus();
             showSuccess(t('gfwlist_config_saved'));
         } catch (e: any) {
@@ -112,14 +102,9 @@ const GfwList = () => {
     const handleUpdate = async () => {
         setUpdating(true);
         try {
-            const res = await fetch(`${API_BASE}/update`, { method: 'POST' });
-            if (!res.ok) {
-                const body = await res.json().catch(() => ({}));
-                throw new Error(body.message || `HTTP ${res.status}`);
-            }
-            const data = await res.json();
+            const data = await apiClient.updateGfwList();
             await fetchStatus();
-            showSuccess(t('gfwlist_updated', { count: data.domain_count }));
+            showSuccess(t('gfwlist_updated', { count: data?.domain_count ?? 0 }));
         } catch (e: any) {
             showError(t('gfwlist_update_error', { error: e.message }));
         } finally {
@@ -128,7 +113,7 @@ const GfwList = () => {
     };
 
     const handleAddDomain = async () => {
-        const domain = newDomain.trim();
+        const domain = newDomain.trim().toLowerCase();
         if (!domain) return;
         if (!/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(domain)) {
             setDomainError(t('gfwlist_domain_invalid'));
@@ -136,12 +121,7 @@ const GfwList = () => {
         }
         setDomainError('');
         try {
-            const res = await fetch(`${API_BASE}/domains/add`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ domains: [domain] }),
-            });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            await apiClient.addGfwListDomains([domain]);
             setNewDomain('');
             await fetchStatus();
             showSuccess(t('gfwlist_domain_added'));
@@ -152,12 +132,7 @@ const GfwList = () => {
 
     const handleRemoveDomain = async (domain: string) => {
         try {
-            const res = await fetch(`${API_BASE}/domains/remove`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ domains: [domain] }),
-            });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            await apiClient.removeGfwListDomains([domain]);
             await fetchStatus();
             showSuccess(t('gfwlist_domain_removed'));
         } catch (e: any) {
@@ -247,7 +222,7 @@ const GfwList = () => {
                             value={updateInterval}
                             onChange={(e) => setUpdateInterval(Number(e.target.value))}
                         >
-                        <option value={3600}>{t('interval_hours', { count: 1 })}</option>
+                            <option value={3600}>{t('interval_hours', { count: 1 })}</option>
                             <option value={21600}>{t('interval_hours', { count: 6 })}</option>
                             <option value={43200}>{t('interval_hours', { count: 12 })}</option>
                             <option value={86400}>{t('interval_24_hour')}</option>
@@ -255,7 +230,7 @@ const GfwList = () => {
                         </select>
                     </div>
 
-                    {/* Status info */}
+                    {/* Domain count */}
                     <div className="form__group form-group">
                         <label className="form__label">{t('gfwlist_domain_count')}</label>
                         <div className="form-control-plaintext">

@@ -696,6 +696,47 @@ class Api {
 
         return this.makeRequest(path, method);
     }
+
+    // GFW List
+    GET_GFWLIST_STATUS = { path: 'gfwlist/status', method: 'GET' };
+
+    SET_GFWLIST_CONFIG = { path: 'gfwlist/config', method: 'POST' };
+
+    UPDATE_GFWLIST = { path: 'gfwlist/update', method: 'POST' };
+
+    ADD_GFWLIST_DOMAINS = { path: 'gfwlist/domains/add', method: 'POST' };
+
+    REMOVE_GFWLIST_DOMAINS = { path: 'gfwlist/domains/remove', method: 'POST' };
+
+    getGfwListStatus() {
+        const { path, method } = this.GET_GFWLIST_STATUS;
+
+        return this.makeRequest(path, method);
+    }
+
+    setGfwListConfig(data: any) {
+        const { path, method } = this.SET_GFWLIST_CONFIG;
+
+        return this.makeRequest(path, method, { data });
+    }
+
+    updateGfwList() {
+        const { path, method } = this.UPDATE_GFWLIST;
+
+        return this.makeRequest(path, method);
+    }
+
+    addGfwListDomains(domains: string[]) {
+        const { path, method } = this.ADD_GFWLIST_DOMAINS;
+
+        return this.makeRequest(path, method, { data: { domains } });
+    }
+
+    removeGfwListDomains(domains: string[]) {
+        const { path, method } = this.REMOVE_GFWLIST_DOMAINS;
+
+        return this.makeRequest(path, method, { data: { domains } });
+    }
 }
 
 const apiClient = new Api();
