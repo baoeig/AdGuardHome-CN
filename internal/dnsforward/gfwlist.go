@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -209,13 +210,18 @@ func parseGFWList(data []byte) (domains map[string]struct{}, err error) {
 // Supported formats:
 //   - ||domain.com  — domain match (most common)
 //   - .domain.com   — domain suffix match
+//   - |http://domain.com or |https://domain.com — URL rules
+//   - plain domain name without prefix
 //
 // Ignored formats:
 //   - ! comment
 //   - @@ exception rules
 //   - /regexp/
-//   - |http:// URL rules
 //   - [AutoProxy ...] header
+
+// isIgnoredAutoProxyLine reports whether line should be skipped when parsing
+// an AutoProxy format GFW list.  It returns true for empty lines, comments,
+// exception rules, regexp rules, and the AutoProxy header.
 func isIgnoredAutoProxyLine(line string) bool {
 	return line == "" ||
 		strings.HasPrefix(line, "!") ||
@@ -224,6 +230,8 @@ func isIgnoredAutoProxyLine(line string) bool {
 		strings.HasPrefix(line, "/")
 }
 
+// extractDomainFromURLRule extracts the hostname from a |http:// or |https://
+// style AutoProxy rule.  It returns an empty string if the domain is invalid.
 func extractDomainFromURLRule(line string) string {
 	domain := strings.TrimPrefix(line, "|http://")
 	domain = strings.TrimPrefix(domain, "|https://")
@@ -277,7 +285,7 @@ func isValidDomainChar(r rune) bool {
 }
 
 // normalizeDomain validates and normalizes a domain name.  It returns an empty
-// string if the domain is invalid.
+// string if the domain is invalid or is an IP address.
 func normalizeDomain(domain string) string {
 	domain = strings.ToLower(strings.TrimSpace(domain))
 	domain = strings.TrimSuffix(domain, ".")
@@ -291,8 +299,8 @@ func normalizeDomain(domain string) string {
 		return ""
 	}
 
-	// Reject IP addresses.
-	if strings.IndexByte(domain, ':') >= 0 {
+	// Reject both IPv4 and IPv6 addresses using net.ParseIP.
+	if net.ParseIP(domain) != nil {
 		return ""
 	}
 
@@ -436,13 +444,16 @@ func (s *Server) prepareGFWList(ctx context.Context) (err error) {
 		s.gfwlist.stop()
 	}
 
-	gfwLogger := s.baseLogger.With(slogutil.KeyPrefix, "gfwlist")
-	s.gfwlist = newGFWListManager(gfwLogger, conf, filepath.Dir(s.conf.UpstreamDNSFileName))
-
-	// If dataDir is empty, use a default.
-	if s.gfwlist.dataDir == "" || s.gfwlist.dataDir == "." {
-		s.gfwlist.dataDir = "data"
+	// Determine the data directory for caching.  Prefer the directory of the
+	// upstream DNS config file; fall back to "data" if it is empty or "."
+	// (which happens when UpstreamDNSFileName is a bare filename with no path).
+	dataDir := filepath.Dir(s.conf.UpstreamDNSFileName)
+	if dataDir == "" || dataDir == "." {
+		dataDir = "data"
 	}
+
+	gfwLogger := s.baseLogger.With(slogutil.KeyPrefix, "gfwlist")
+	s.gfwlist = newGFWListManager(gfwLogger, conf, dataDir)
 
 	// Load and start background updater.
 	s.gfwlist.start(ctx)

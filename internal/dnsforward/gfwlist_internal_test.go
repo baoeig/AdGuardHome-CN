@@ -113,6 +113,14 @@ func TestNormalizeDomain(t *testing.T) {
 		domain: "::1",
 		want:   "",
 	}, {
+		name:   "ipv4_address",
+		domain: "1.2.3.4",
+		want:   "",
+	}, {
+		name:   "ipv4_address_with_port",
+		domain: "8.8.8.8",
+		want:   "",
+	}, {
 		name:   "subdomain",
 		domain: "sub.domain.example.com",
 		want:   "sub.domain.example.com",
