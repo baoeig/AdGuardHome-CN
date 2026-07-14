@@ -771,6 +771,8 @@
   "gfwlist_domain_count": "总域名数（GFW 列表 + 自定义）",
   "gfwlist_update_now": "立即更新列表",
   "gfwlist_updating": "更新中...",
+  "gfwlist_save": "保存",
+  "gfwlist_saving": "保存中...",
   "gfwlist_config_saved": "GFW 列表配置已保存",
   "gfwlist_updated": "GFW 列表已更新 — 已加载 {{count}} 个域名",
   "gfwlist_load_error": "加载 GFW 列表状态失败：{{error}}",
@@ -778,8 +780,16 @@
   "gfwlist_update_error": "更新 GFW 列表失败：{{error}}",
   "gfwlist_custom_domains": "自定义域名",
   "gfwlist_custom_domains_desc": "添加额外的域名，使其也通过 GFW 列表的上游 DNS 服务器进行解析（不依赖 GFW 列表本身）。",
+  "gfwlist_custom_domains_hint": "输入域名，可用逗号、空格或换行分隔多个域名。",
   "gfwlist_no_custom_domains": "尚未添加自定义域名。",
+  "gfwlist_add_domain": "添加",
   "gfwlist_domain_added": "域名添加成功",
+  "gfwlist_domains_added": "成功添加 {{count}} 个域名",
+  "gfwlist_domains_partial": "已添加 {{added}} 个域名，{{skipped}} 个因错误被跳过",
   "gfwlist_domain_removed": "域名删除成功",
-  "gfwlist_domain_invalid": "域名格式无效"
+  "gfwlist_domain_invalid": "域名格式无效：包含非法字符",
+  "gfwlist_domain_empty": "域名不能为空",
+  "gfwlist_domain_need_dot": "域名必须包含至少一个点（例如 example.com）",
+  "gfwlist_domain_is_ip": "不支持 IP 地址，请输入域名",
+  "gfwlist_domain_duplicate": "该域名已添加过"
 }

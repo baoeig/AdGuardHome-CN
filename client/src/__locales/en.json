@@ -771,6 +771,8 @@
   "gfwlist_domain_count": "Total domain count (GFW list + custom)",
   "gfwlist_update_now": "Update list now",
   "gfwlist_updating": "Updating...",
+  "gfwlist_save": "Save",
+  "gfwlist_saving": "Saving...",
   "gfwlist_config_saved": "GFW list configuration saved",
   "gfwlist_updated": "GFW list updated — {{count}} domains loaded",
   "gfwlist_load_error": "Failed to load GFW list status: {{error}}",
@@ -778,8 +780,16 @@
   "gfwlist_update_error": "Failed to update GFW list: {{error}}",
   "gfwlist_custom_domains": "Custom Domains",
   "gfwlist_custom_domains_desc": "Add extra domains that should also use the GFW list upstream DNS servers, regardless of the GFW list.",
+  "gfwlist_custom_domains_hint": "Enter a domain name. You can separate multiple domains with commas, spaces, or newlines.",
   "gfwlist_no_custom_domains": "No custom domains added yet.",
+  "gfwlist_add_domain": "Add",
   "gfwlist_domain_added": "Domain added successfully",
+  "gfwlist_domains_added": "{{count}} domains added successfully",
+  "gfwlist_domains_partial": "{{added}} domains added, {{skipped}} skipped due to errors",
   "gfwlist_domain_removed": "Domain removed successfully",
-  "gfwlist_domain_invalid": "Invalid domain name"
+  "gfwlist_domain_invalid": "Invalid domain name: contains invalid characters",
+  "gfwlist_domain_empty": "Domain name cannot be empty",
+  "gfwlist_domain_need_dot": "Domain name must contain at least one dot (e.g. example.com)",
+  "gfwlist_domain_is_ip": "IP addresses are not supported, please enter a domain name",
+  "gfwlist_domain_duplicate": "This domain has already been added"
 }
