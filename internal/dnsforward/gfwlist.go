@@ -217,13 +217,27 @@ func parseGFWList(data []byte) (domains map[string]struct{}, err error) {
 //   - /regexp/
 //   - |http:// URL rules
 //   - [AutoProxy ...] header
-func extractDomainFromAutoProxy(line string) (domain string) {
-	// Skip empty lines, comments, exceptions, regexps and header.
-	if line == "" ||
+func isIgnoredAutoProxyLine(line string) bool {
+	return line == "" ||
 		strings.HasPrefix(line, "!") ||
 		strings.HasPrefix(line, "@@") ||
 		strings.HasPrefix(line, "[") ||
-		strings.HasPrefix(line, "/") {
+		strings.HasPrefix(line, "/")
+}
+
+func extractDomainFromURLRule(line string) string {
+	domain := strings.TrimPrefix(line, "|http://")
+	domain = strings.TrimPrefix(domain, "|https://")
+	if idx := strings.IndexAny(domain, "/:?"); idx >= 0 {
+		domain = domain[:idx]
+	}
+
+	return normalizeDomain(domain)
+}
+
+func extractDomainFromAutoProxy(line string) (domain string) {
+	// Skip empty lines, comments, exceptions, regexps and header.
+	if isIgnoredAutoProxyLine(line) {
 		return ""
 	}
 
@@ -247,14 +261,7 @@ func extractDomainFromAutoProxy(line string) (domain string) {
 
 	// Handle |https://domain.com or |http://domain.com URL rules.
 	if strings.HasPrefix(line, "|http://") || strings.HasPrefix(line, "|https://") {
-		domain = line
-		domain = strings.TrimPrefix(domain, "|http://")
-		domain = strings.TrimPrefix(domain, "|https://")
-		if idx := strings.IndexAny(domain, "/:?"); idx >= 0 {
-			domain = domain[:idx]
-		}
-
-		return normalizeDomain(domain)
+		return extractDomainFromURLRule(line)
 	}
 
 	// Try to extract domain from other patterns that look like plain domains.
@@ -264,6 +271,10 @@ func extractDomainFromAutoProxy(line string) (domain string) {
 	}
 
 	return ""
+}
+
+func isValidDomainChar(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '-' || r == '_'
 }
 
 // normalizeDomain validates and normalizes a domain name.  It returns an empty
@@ -288,7 +299,7 @@ func normalizeDomain(domain string) string {
 
 	// Check for valid domain characters.
 	for _, r := range domain {
-		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '-' || r == '_') {
+		if !isValidDomainChar(r) {
 			return ""
 		}
 	}
