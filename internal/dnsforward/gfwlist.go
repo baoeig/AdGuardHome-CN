@@ -67,6 +67,9 @@ type gfwlistManager struct {
 
 	// stopCh is used to stop the background updater.
 	stopCh chan struct{}
+
+	// stopOnce ensures stopCh is closed only once.
+	stopOnce sync.Once
 }
 
 // newGFWListManager creates a new gfwlistManager.  l and conf must not be nil.
@@ -102,7 +105,9 @@ func (m *gfwlistManager) start(ctx context.Context) {
 
 // stop stops the background updater.
 func (m *gfwlistManager) stop() {
-	close(m.stopCh)
+	m.stopOnce.Do(func() {
+		close(m.stopCh)
+	})
 }
 
 // backgroundUpdater downloads the GFW list once immediately, then repeats
