@@ -11,23 +11,23 @@
 </p>
 <p align="center">
   <a href="https://adguard.com/">AdGuard.com</a> |
-  <a href="https://github.com/AdguardTeam/AdGuardHome/wiki">Wiki</a> |
+  <a href="https://github.com/baoeig/AdGuardHome-CN/wiki">Wiki</a> |
   <a href="https://reddit.com/r/Adguard">Reddit</a> |
   <a href="https://twitter.com/AdGuard">Twitter</a> |
   <a href="https://t.me/adguard_en">Telegram</a>
   <br/><br/>
-  <a href="https://codecov.io/github/AdguardTeam/AdGuardHome?branch=master">
-    <img src="https://img.shields.io/codecov/c/github/AdguardTeam/AdGuardHome/master.svg" alt="Code Coverage"/>
+  <a href="https://codecov.io/github/baoeig/AdGuardHome-CN?branch=master">
+    <img src="https://img.shields.io/codecov/c/github/baoeig/AdGuardHome-CN/master.svg" alt="Code Coverage"/>
   </a>
-  <a href="https://goreportcard.com/report/AdguardTeam/AdGuardHome">
-    <img src="https://goreportcard.com/badge/github.com/AdguardTeam/AdGuardHome" alt="Go Report Card"/>
+  <a href="https://goreportcard.com/report/baoeig/AdGuardHome-CN">
+    <img src="https://goreportcard.com/badge/github.com/baoeig/AdGuardHome-CN" alt="Go Report Card"/>
   </a>
   <a href="https://hub.docker.com/r/adguard/adguardhome">
     <img alt="Docker Pulls" src="https://img.shields.io/docker/pulls/adguard/adguardhome.svg?maxAge=604800"/>
   </a>
   <br/>
-  <a href="https://github.com/AdguardTeam/AdGuardHome/releases">
-    <img src="https://img.shields.io/github/release/AdguardTeam/AdGuardHome/all.svg" alt="Latest release"/>
+  <a href="https://github.com/baoeig/AdGuardHome-CN/releases">
+    <img src="https://img.shields.io/github/release/baoeig/AdGuardHome-CN/all.svg" alt="Latest release"/>
   </a>
   <a href="https://snapcraft.io/adguard-home">
     <img alt="adguard-home" src="https://snapcraft.io/adguard-home/badge.svg"/>
@@ -74,19 +74,19 @@ It operates as a DNS server that re-routes tracking domains to a “black hole�
 To install with `curl` run the following command:
 
 ```sh
-curl -s -S -L https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/master/scripts/install.sh | sh -s -- -v
+curl -s -S -L https://raw.githubusercontent.com/baoeig/AdGuardHome-CN/master/scripts/install.sh | sh -s -- -v
 ```
 
 To install with `wget` run the following command:
 
 ```sh
-wget --no-verbose -O - https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/master/scripts/install.sh | sh -s -- -v
+wget --no-verbose -O - https://raw.githubusercontent.com/baoeig/AdGuardHome-CN/master/scripts/install.sh | sh -s -- -v
 ```
 
 To install with `fetch` run the following command:
 
 ```sh
-fetch -o - https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/master/scripts/install.sh | sh -s -- -v
+fetch -o - https://raw.githubusercontent.com/baoeig/AdGuardHome-CN/master/scripts/install.sh | sh -s -- -v
 ```
 
 The script also accepts some options:
@@ -120,14 +120,14 @@ If you're running **Linux,** there's a secure and easy way to install AdGuard Ho
 
 See our [Wiki][wiki].
 
-[wiki]: https://github.com/AdguardTeam/AdGuardHome/wiki
+[wiki]: https://github.com/baoeig/AdGuardHome-CN/wiki
 
 ### <a href="#api" id="api" name="api">API</a>
 
 If you want to integrate with AdGuard Home, you can use our [REST API][openapi]. Alternatively, you can use this [python client][pyclient], which can be used to build the [AdGuard Home Assistant integration][assistant-integration].
 
 [assistant-integration]:   https://www.home-assistant.io/integrations/adguard/
-[openapi]:  https://github.com/AdguardTeam/AdGuardHome/tree/master/openapi
+[openapi]:  https://github.com/baoeig/AdGuardHome-CN/tree/master/openapi
 [pyclient]: https://pypi.org/project/adguardhome/
 
 ## <a href="#comparison" id="comparison" name="comparison">Comparing AdGuard Home to other solutions</a>
@@ -195,7 +195,7 @@ Essentially, any advertising that shares a domain with content cannot be blocked
 Is there a chance to handle this in the future?  DNS will never be enough to do this. Our only option is to use a content blocking proxy like what we do in the standalone AdGuard applications. We're [going to bring][issue-1228] this feature support to AdGuard Home in the future. Unfortunately, even in this case, there still will be cases when this won't be enough or would require quite a complicated configuration.
 
 [blog-adaway]: https://adguard.com/blog/adguard-vs-adaway-dns66.html
-[issue-1228]:  https://github.com/AdguardTeam/AdGuardHome/issues/1228
+[issue-1228]:  https://github.com/baoeig/AdGuardHome-CN/issues/1228
 
 ## <a href="#how-to-build" id="how-to-build" name="how-to-build">How to build from source</a>
 
@@ -214,8 +214,8 @@ You will need this to build AdGuard Home:
 Open your terminal and execute these commands:
 
 ```sh
-git clone https://github.com/AdguardTeam/AdGuardHome
-cd AdGuardHome
+git clone https://github.com/baoeig/AdGuardHome-CN
+cd AdGuardHome-CN
 make
 ```
 
@@ -286,9 +286,9 @@ When you need to debug the frontend without recompiling the production version e
 
 [`snapcraft`]:  https://snapcraft.io/
 [buildx]:       https://docs.docker.com/buildx/working-with-buildx/
-[src-makefile]: https://github.com/AdguardTeam/AdGuardHome/blob/master/Makefile
-[targ-docker]:  https://github.com/AdguardTeam/AdGuardHome/tree/master/scripts#build-dockersh-build-a-multi-architecture-docker-image
-[targ-release]: https://github.com/AdguardTeam/AdGuardHome/tree/master/scripts#build-releasesh-build-a-release-for-all-platforms
+[src-makefile]: https://github.com/baoeig/AdGuardHome-CN/blob/master/Makefile
+[targ-docker]:  https://github.com/baoeig/AdGuardHome-CN/tree/master/scripts#build-dockersh-build-a-multi-architecture-docker-image
+[targ-release]: https://github.com/baoeig/AdGuardHome-CN/tree/master/scripts#build-releasesh-build-a-release-for-all-platforms
 
 #### <a href="#e2e-frontend-tests" id="e2e-frontend-tests" name="e2e-frontend-tests">End-to-End (E2E) Frontend Tests</a>
 
@@ -313,7 +313,7 @@ You are welcome to fork this repository, make your changes and [submit a pull re
 Please note that we don't expect people to contribute to both UI and backend parts of the program simultaneously. Ideally, the backend part is implemented first, i.e. configuration, API, and the functionality itself. The UI part can be implemented later in a different pull request by a different person.
 
 [guide]: https://github.com/AdguardTeam/CodeGuidelines/
-[pr]:    https://github.com/AdguardTeam/AdGuardHome/pulls
+[pr]:    https://github.com/baoeig/AdGuardHome-CN/pulls
 
 ### <a href="#test-unstable-versions" id="test-unstable-versions" name="test-unstable-versions">Test unstable versions</a>
 
@@ -334,22 +334,22 @@ There are three options how you can install an unstable version:
    Script to install a beta version:
 
    ```sh
-   curl -s -S -L https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/master/scripts/install.sh | sh -s -- -c beta
+   curl -s -S -L https://raw.githubusercontent.com/baoeig/AdGuardHome-CN/master/scripts/install.sh | sh -s -- -c beta
    ```
 
    Script to install an edge version:
 
    ```sh
-   curl -s -S -L https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/master/scripts/install.sh | sh -s -- -c edge
+   curl -s -S -L https://raw.githubusercontent.com/baoeig/AdGuardHome-CN/master/scripts/install.sh | sh -s -- -c edge
    ```
 
-[wiki-platf]: https://github.com/AdguardTeam/AdGuardHome/wiki/Platforms
+[wiki-platf]: https://github.com/baoeig/AdGuardHome-CN/wiki/Platforms
 
 ### <a href="#reporting-issues" id="reporting-issues" name="reporting-issues">Report issues</a>
 
 If you run into any problem or have a suggestion, head to [this page][iss] and click on the “New issue” button. Please follow the instructions in the issue form carefully and don't forget to start by searching for duplicates.
 
-[iss]: https://github.com/AdguardTeam/AdGuardHome/issues
+[iss]: https://github.com/baoeig/AdGuardHome-CN/issues
 
 ### <a href="#translate" id="translate" name="translate">Help with translations</a>
 
@@ -362,7 +362,7 @@ If you want to help with AdGuard Home translations, please learn more about tran
 
 Another way you can contribute is by [looking for issues][iss-help] marked as `help wanted`, asking if the issue is up for grabs, and sending a PR fixing the bug or implementing the feature.
 
-[iss-help]: https://github.com/AdguardTeam/AdGuardHome/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22
+[iss-help]: https://github.com/baoeig/AdGuardHome-CN/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22
 
 ## <a href="#uses" id="uses" name="uses">Projects that use AdGuard Home</a>
 
@@ -416,7 +416,7 @@ You might have seen that [CoreDNS] was mentioned here before, but we've stopped 
 For the full list of all Node.js packages in use, please take a look at [`client/package.json`][src-packagejson] file.
 
 [CoreDNS]:         https://coredns.io
-[src-packagejson]: https://github.com/AdguardTeam/AdGuardHome/blob/master/client/package.json
+[src-packagejson]: https://github.com/baoeig/AdGuardHome-CN/blob/master/client/package.json
 
 ## <a href="#privacy" id="privacy" name="privacy">Privacy</a>
 
