@@ -453,4 +453,3 @@ func (s *Server) prepareGFWList(ctx context.Context) (err error) {
 
 	return nil
 }
-
