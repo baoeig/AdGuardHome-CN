@@ -385,7 +385,9 @@ configure() {
 	check_out_dir
 
 	pkg_name="AdGuardHome_${os}_${cpu}.${pkg_ext}"
-	url="https://static.adtidy.org/adguardhome/${channel}/${pkg_name}"
+	# 修改为从你自己的项目 (比如 GitHub Releases) 下载编译好的包
+	# 这里假设你把编译好的包发布在 GitHub Releases，并且 tag 为最新的 release
+	url="https://github.com/baoeig/AdGuardHome-CN/releases/latest/download/${pkg_name}"
 	agh_dir="${out_dir}/AdGuardHome"
 	readonly pkg_name url agh_dir
 
