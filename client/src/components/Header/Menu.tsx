@@ -80,6 +80,10 @@ const FILTERS_ITEMS = [
         route: FILTERS_URLS.custom_rules,
         text: 'custom_filtering_rules',
     },
+    {
+        route: FILTERS_URLS.gfwlist,
+        text: 'gfwlist_title',
+    },
 ];
 
 interface MenuProps {

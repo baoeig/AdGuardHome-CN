@@ -43,6 +43,8 @@ import CustomRules from '../../containers/CustomRules';
 
 import Services from '../Filters/Services';
 
+import GfwList from '../Settings/GfwList';
+
 import Logs from '../Logs';
 import ProtectionTimer from '../ProtectionTimer';
 import { RootState } from '../../initialState';
@@ -100,6 +102,10 @@ const ROUTES = [
     {
         path: FILTERS_URLS.blocked_services,
         component: Services,
+    },
+    {
+        path: FILTERS_URLS.gfwlist,
+        component: GfwList,
     },
 ];
 
