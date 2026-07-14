@@ -534,7 +534,6 @@ func (s *Server) Prepare(ctx context.Context, conf *ServerConfig) (err error) {
 	s.setupAddrProc()
 
 	s.registerHandlers()
-	s.registerGFWListHandlers()
 
 	return nil
 }

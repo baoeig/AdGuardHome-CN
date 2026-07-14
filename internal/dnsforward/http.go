@@ -836,5 +836,7 @@ func (s *Server) registerHandlers() {
 
 	s.conf.HTTPReg.Register(http.MethodPost, "/control/cache_clear", s.handleCacheClear)
 
+	s.registerGFWListHandlers()
+
 	webRegistered = true
 }
