@@ -170,6 +170,10 @@ func (m *gfwlistManager) start(ctx context.Context, domains map[string]struct{})
 
 	m.logger.InfoContext(ctx, "gfwlist loaded", "domains", m.domainCount())
 
+	if m.conf.URL == "" {
+		return
+	}
+
 	// Start background updater.  The current cache is applied during
 	// preparation; later successful updates trigger a reconfigure through
 	// m.onUpdate.
@@ -275,7 +279,7 @@ func (m *gfwlistManager) update(ctx context.Context) (domains map[string]struct{
 		m.logger.WarnContext(ctx, "saving gfwlist cache", slogutil.KeyError, cacheErr)
 	}
 
-	return cloneGFWListDomains(domains), nil
+	return domains, nil
 }
 
 // parseGFWList decodes and parses a base64-encoded AutoProxy format GFW list.
