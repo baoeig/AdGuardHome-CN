@@ -179,8 +179,8 @@ func (s *Server) handleGFWListUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Reconfigure to apply new domains.
-	if err := s.Reconfigure(ctx, nil); err != nil {
-		aghhttp.WriteJSONResponseError(ctx, s.logger, w, r, err)
+	if reconfigureErr := s.Reconfigure(ctx, nil); reconfigureErr != nil {
+		aghhttp.WriteJSONResponseError(ctx, s.logger, w, r, reconfigureErr)
 
 		return
 	}
@@ -204,31 +204,7 @@ func (s *Server) handleGFWListAddDomains(w http.ResponseWriter, r *http.Request)
 	}
 
 	s.serverLock.Lock()
-
-	if s.conf.GFWList == nil {
-		s.conf.GFWList = &GFWListConfig{}
-	}
-
-	existing := make(map[string]struct{}, len(s.conf.GFWList.CustomDomains))
-	for _, d := range s.conf.GFWList.CustomDomains {
-		d = normalizeGFWDomainRule(d)
-		if d != "" {
-			existing[d] = struct{}{}
-		}
-	}
-
-	for _, d := range req.Domains {
-		d = normalizeGFWDomainRule(d)
-		if d == "" {
-			continue
-		}
-
-		if _, ok := existing[d]; !ok {
-			s.conf.GFWList.CustomDomains = append(s.conf.GFWList.CustomDomains, d)
-			existing[d] = struct{}{}
-		}
-	}
-
+	s.addGFWListCustomDomainsLocked(req.Domains)
 	s.serverLock.Unlock()
 
 	s.conf.ConfModifier.Apply(ctx)
@@ -288,6 +264,29 @@ func (s *Server) handleGFWListRemoveDomains(w http.ResponseWriter, r *http.Reque
 	}
 
 	aghhttp.WriteJSONResponseOK(ctx, s.logger, w, r, &struct{}{})
+}
+
+// addGFWListCustomDomainsLocked adds normalized domains to the GFW list
+// configuration.  s.serverLock must be held.
+func (s *Server) addGFWListCustomDomainsLocked(domains []string) {
+	if s.conf.GFWList == nil {
+		s.conf.GFWList = &GFWListConfig{}
+	}
+
+	existing := normalizeGFWDomainRules(s.conf.GFWList.CustomDomains)
+	for _, domain := range domains {
+		domain = normalizeGFWDomainRule(domain)
+		if domain == "" {
+			continue
+		}
+
+		if _, ok := existing[domain]; ok {
+			continue
+		}
+
+		s.conf.GFWList.CustomDomains = append(s.conf.GFWList.CustomDomains, domain)
+		existing[domain] = struct{}{}
+	}
 }
 
 // handleGFWListCheck handles GET /control/gfwlist/check requests.

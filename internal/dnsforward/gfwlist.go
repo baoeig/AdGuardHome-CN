@@ -198,21 +198,33 @@ func (m *gfwlistManager) backgroundUpdater(ctx context.Context, interval time.Du
 		case <-m.stopCh:
 			return
 		case <-ticker.C:
-			domains, err := m.update(ctx)
-			if err != nil {
-				m.logger.WarnContext(ctx, "updating gfwlist", slogutil.KeyError, err)
-			} else {
-				m.logger.InfoContext(ctx, "gfwlist updated", "domains", m.domainCount())
-				if m.onUpdate != nil {
-					select {
-					case <-m.stopCh:
-						return
-					default:
-						m.onUpdate(ctx, domains)
-					}
-				}
-			}
+			m.handleBackgroundUpdate(ctx)
 		}
+	}
+}
+
+// handleBackgroundUpdate runs a single update tick.
+func (m *gfwlistManager) handleBackgroundUpdate(ctx context.Context) {
+	domains, err := m.update(ctx)
+	if err != nil {
+		m.logger.WarnContext(ctx, "updating gfwlist", slogutil.KeyError, err)
+
+		return
+	}
+
+	m.logger.InfoContext(ctx, "gfwlist updated", "domains", m.domainCount())
+	if m.onUpdate != nil {
+		m.notifyUpdate(ctx, domains)
+	}
+}
+
+// notifyUpdate invokes the post-update callback unless the manager is stopping.
+func (m *gfwlistManager) notifyUpdate(ctx context.Context, domains map[string]struct{}) {
+	select {
+	case <-m.stopCh:
+		return
+	default:
+		m.onUpdate(ctx, domains)
 	}
 }
 
@@ -632,10 +644,7 @@ func (s *Server) prepareGFWList(ctx context.Context) (err error) {
 	conf := s.conf.GFWList
 	if conf == nil || !conf.Enabled {
 		s.pendingGFWListDomains = nil
-		if s.gfwlist != nil {
-			s.gfwlist.stop()
-			s.gfwlist = nil
-		}
+		s.stopGFWList()
 
 		return nil
 	}
@@ -643,21 +652,13 @@ func (s *Server) prepareGFWList(ctx context.Context) (err error) {
 	s.logger.InfoContext(ctx, "initializing gfwlist split routing")
 
 	// Stop previous manager if any.
-	if s.gfwlist != nil {
-		s.gfwlist.stop()
-	}
+	s.stopGFWList()
 
-	// Determine the data directory for caching.  Prefer the directory of the
-	// upstream DNS config file; fall back to "data" if it is empty or "."
-	// (which happens when UpstreamDNSFileName is a bare filename with no path).
-	dataDir := filepath.Dir(s.conf.UpstreamDNSFileName)
-	if dataDir == "" || dataDir == "." {
-		dataDir = "data"
-	}
+	dataDir := s.gfwListDataDir()
 
 	gfwLogger := s.baseLogger.With(slogutil.KeyPrefix, "gfwlist")
 	var gfwMgr *gfwlistManager
-	gfwMgr = newGFWListManager(gfwLogger, conf, dataDir, func(ctx context.Context, domains map[string]struct{}) {
+	updateCallback := func(ctx context.Context, domains map[string]struct{}) {
 		if !s.setPendingGFWListDomains(gfwMgr, domains) {
 			return
 		}
@@ -672,7 +673,8 @@ func (s *Server) prepareGFWList(ctx context.Context) (err error) {
 				reconfigureErr,
 			)
 		}
-	})
+	}
+	gfwMgr = newGFWListManager(gfwLogger, conf, dataDir, updateCallback)
 	s.gfwlist = gfwMgr
 
 	domains := s.pendingGFWListDomains
@@ -682,17 +684,52 @@ func (s *Server) prepareGFWList(ctx context.Context) (err error) {
 	s.gfwlist.start(ctx, domains)
 
 	// Apply to upstream config.
-	if s.conf.UpstreamConfig != nil {
-		opts := &upstream.Options{
-			Logger:     s.baseLogger,
-			Bootstrap:  s.bootstrap,
-			Timeout:    s.conf.UpstreamTimeout,
-			PreferIPv6: s.conf.BootstrapPreferIPv6,
-		}
+	if applyErr := s.applyGFWListToUpstreamConfig(ctx); applyErr != nil {
+		return applyErr
+	}
 
-		if applyErr := s.gfwlist.applyToUpstreamConfig(ctx, s.conf.UpstreamConfig, opts); applyErr != nil {
-			return fmt.Errorf("applying gfwlist to upstream config: %w", applyErr)
-		}
+	return nil
+}
+
+// stopGFWList stops and clears the current GFW list manager.
+func (s *Server) stopGFWList() {
+	if s.gfwlist == nil {
+		return
+	}
+
+	s.gfwlist.stop()
+	s.gfwlist = nil
+}
+
+// gfwListDataDir returns the cache directory for the GFW list.
+func (s *Server) gfwListDataDir() (dataDir string) {
+	// Prefer the directory of the upstream DNS config file; fall back to
+	// "data" if it is empty or "." (which happens when UpstreamDNSFileName is
+	// a bare filename with no path).
+	dataDir = filepath.Dir(s.conf.UpstreamDNSFileName)
+	if dataDir == "" || dataDir == "." {
+		return "data"
+	}
+
+	return dataDir
+}
+
+// applyGFWListToUpstreamConfig applies GFW list routing to the upstream
+// configuration if it exists.
+func (s *Server) applyGFWListToUpstreamConfig(ctx context.Context) (err error) {
+	if s.conf.UpstreamConfig == nil {
+		return nil
+	}
+
+	opts := &upstream.Options{
+		Logger:     s.baseLogger,
+		Bootstrap:  s.bootstrap,
+		Timeout:    s.conf.UpstreamTimeout,
+		PreferIPv6: s.conf.BootstrapPreferIPv6,
+	}
+
+	if applyErr := s.gfwlist.applyToUpstreamConfig(ctx, s.conf.UpstreamConfig, opts); applyErr != nil {
+		return fmt.Errorf("applying gfwlist to upstream config: %w", applyErr)
 	}
 
 	return nil
