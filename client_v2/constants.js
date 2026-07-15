@@ -3,4 +3,4 @@ export const BUILD_ENVS = {
     prod: 'production',
 };
 
-export const BASE_URL = 'control';
+export const BASE_URL = '/control';

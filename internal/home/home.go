@@ -674,6 +674,11 @@ func newWeb(ctx context.Context, conf *webConfig) (web *webAPI, err error) {
 		}
 	}
 
+	clientV2FS, err := clientV2PreviewFS(conf.opts.localFrontend, conf.clientBuildFS)
+	if err != nil {
+		logger.DebugContext(ctx, "client_v2 preview is unavailable", slogutil.KeyError, err)
+	}
+
 	disableUpdate := !isUpdateEnabled(ctx, conf.baseLogger, &conf.opts, conf.isCustomUpdURL)
 
 	webConf := &webAPIConfig{
@@ -687,7 +692,8 @@ func newWeb(ctx context.Context, conf *webConfig) (web *webAPI, err error) {
 		auth:               conf.auth,
 		mux:                conf.mux,
 
-		clientFS: clientFS,
+		clientFS:   clientFS,
+		clientV2FS: clientV2FS,
 
 		BindAddr: config.HTTPConfig.Address,
 
@@ -712,6 +718,33 @@ func newWeb(ctx context.Context, conf *webConfig) (web *webAPI, err error) {
 	}
 
 	return web, nil
+}
+
+// clientV2PreviewFS returns the optional filesystem for the client_v2 preview.
+// It is intentionally separate from the active frontend so the default web UI
+// remains served from build/static.
+func clientV2PreviewFS(localFrontend bool, clientBuildFS fs.FS) (clientV2FS fs.FS, err error) {
+	const previewSubdir = "build/client_v2"
+
+	if localFrontend {
+		clientV2FS = os.DirFS(previewSubdir)
+	} else {
+		if clientBuildFS == nil {
+			return nil, errors.Error("embedded frontend filesystem is nil")
+		}
+
+		clientV2FS, err = fs.Sub(clientBuildFS, previewSubdir)
+		if err != nil {
+			return nil, fmt.Errorf("getting embedded client_v2 subdir: %w", err)
+		}
+	}
+
+	_, err = fs.Stat(clientV2FS, "index.html")
+	if err != nil {
+		return nil, fmt.Errorf("checking client_v2 preview index: %w", err)
+	}
+
+	return clientV2FS, nil
 }
 
 // suggestedWebPort returns the suggested default HTTP port for the installation

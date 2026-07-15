@@ -80,6 +80,10 @@ type webAPIConfig struct {
 	// clientFS is used to initialize file server.  It must not be nil.
 	clientFS fs.FS
 
+	// clientV2FS is used to serve the optional client_v2 preview.  If nil, the
+	// preview route isn't registered.
+	clientV2FS fs.FS
+
 	// BindAddr is the binding address with port for plain HTTP web interface.
 	BindAddr netip.AddrPort
 
@@ -260,6 +264,14 @@ func newWebAPI(ctx context.Context, conf *webAPIConfig) (w *webAPI) {
 	clientFS := http.FileServer(http.FS(conf.clientFS))
 
 	mux := conf.mux
+	if conf.clientV2FS != nil && !conf.firstRun {
+		clientV2FS := http.FileServer(http.FS(conf.clientV2FS))
+		mux.Handle("/client_v2/", httputil.Wrap(
+			http.StripPrefix("/client_v2/", clientV2FS),
+			httputil.MiddlewareFunc(gziphandler.GzipHandler),
+		))
+	}
+
 	// if not configured, redirect / to /install.html, otherwise redirect /install.html to /
 	mux.Handle("/", httputil.Wrap(
 		clientFS,

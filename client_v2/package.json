@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "cross-env NODE_ENV=development BUILD_ENV=dev webpack-dev-server --config webpack.dev.js",
     "build-dev": "cross-env BUILD_ENV=dev webpack --config webpack.dev.js",
+    "build-preview": "cross-env BUILD_ENV=prod CLIENT_V2_PREVIEW=1 webpack --config webpack.prod.js",
     "build-prod": "cross-env BUILD_ENV=prod webpack --config webpack.prod.js",
     "check": "npm run lint && npm run typecheck && npm run test",
     "watch": "cross-env BUILD_ENV=dev webpack --config webpack.dev.js --watch",

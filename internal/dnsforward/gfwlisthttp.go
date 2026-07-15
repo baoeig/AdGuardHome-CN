@@ -241,8 +241,19 @@ func (s *Server) handleGFWListAddDomains(w http.ResponseWriter, r *http.Request)
 
 	s.serverLock.Lock()
 	addedCount := s.addGFWListCustomDomainsLocked(req.Domains)
-	customDomainsTotal := len(s.conf.GFWList.CustomDomains)
+	customDomainsTotal := 0
+	if s.conf.GFWList != nil {
+		customDomainsTotal = len(s.conf.GFWList.CustomDomains)
+	}
 	s.serverLock.Unlock()
+
+	if addedCount == 0 {
+		aghhttp.WriteJSONResponseOK(ctx, s.logger, w, r, &jsonGFWListDomainResp{
+			CustomDomainsTotal: customDomainsTotal,
+		})
+
+		return
+	}
 
 	s.conf.ConfModifier.Apply(ctx)
 
@@ -285,6 +296,14 @@ func (s *Server) handleGFWListRemoveDomains(w http.ResponseWriter, r *http.Reque
 
 	s.serverLock.Unlock()
 
+	if removedCount == 0 {
+		aghhttp.WriteJSONResponseOK(ctx, s.logger, w, r, &jsonGFWListDomainResp{
+			CustomDomainsTotal: customDomainsTotal,
+		})
+
+		return
+	}
+
 	s.conf.ConfModifier.Apply(ctx)
 
 	// Reconfigure to apply.
@@ -304,7 +323,15 @@ func (s *Server) handleGFWListRemoveDomains(w http.ResponseWriter, r *http.Reque
 // configuration.  s.serverLock must be held.
 func (s *Server) addGFWListCustomDomainsLocked(domains []string) (added int) {
 	if s.conf.GFWList == nil {
-		s.conf.GFWList = &GFWListConfig{}
+		conf := &GFWListConfig{}
+		added = conf.addCustomDomains(domains)
+		if added == 0 {
+			return 0
+		}
+
+		s.conf.GFWList = conf
+
+		return added
 	}
 
 	added = s.conf.GFWList.addCustomDomains(domains)

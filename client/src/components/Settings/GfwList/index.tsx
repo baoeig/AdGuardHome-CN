@@ -134,9 +134,8 @@ const GfwList = () => {
     const [checkError, setCheckError] = useState('');
     const [checking, setChecking] = useState(false);
 
-    // Track live domain count separately so it updates immediately after
-    // operations like "update list now" without waiting for a full status
-    // fetch.
+    // Track live domain count separately so it can fall back to update responses
+    // if a follow-up status refresh fails.
     const [liveDomainCount, setLiveDomainCount] = useState(0);
 
     const customDomains = status.custom_domains || [];
@@ -157,7 +156,7 @@ const GfwList = () => {
         setSuccessMsg('');
     };
 
-    const fetchStatus = async (page = customDomainPage) => {
+    const fetchStatus = async (page = customDomainPage, showLoadError = true) => {
         try {
             const data: GfwListStatus = await apiClient.getGfwListStatus({
                 custom_domain_page: page,
@@ -172,7 +171,9 @@ const GfwList = () => {
             setCustomDomainPage(data.custom_domain_page ?? page);
             return data;
         } catch (e: any) {
-            showError(t('gfwlist_load_error', { error: e.message }));
+            if (showLoadError) {
+                showError(t('gfwlist_load_error', { error: e.message }));
+            }
             return undefined;
         } finally {
             setLoading(false);
@@ -216,7 +217,8 @@ const GfwList = () => {
         setUpdating(true);
         try {
             const data = await apiClient.updateGfwList();
-            const newCount = data?.domain_count ?? 0;
+            const refreshedStatus = await fetchStatus(customDomainPage, false);
+            const newCount = refreshedStatus?.domain_count ?? data?.domain_count ?? liveDomainCount;
 
             setLiveDomainCount(newCount);
 
@@ -240,17 +242,21 @@ const GfwList = () => {
 
         if (candidates.length === 0) return;
 
-        // Validate each domain.
+        // Validate each domain and skip duplicates already visible in this page
+        // or repeated in the same batch.  The backend still deduplicates against
+        // the whole configured list.
         const validDomains: string[] = [];
         const errors: string[] = [];
+        const existingDomains = new Set(customDomains);
 
         candidates.forEach((rule) => {
             const domain = normalizeGfwDomainRule(rule);
-            const err = validateDomainRule(rule);
+            const err = validateDomainRule(rule, existingDomains);
             if (err) {
                 errors.push(`${rule}: ${t(err)}`);
             } else {
                 validDomains.push(domain);
+                existingDomains.add(domain);
             }
         });
 

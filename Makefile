@@ -21,6 +21,7 @@ VERBOSE.MACRO = $${VERBOSE:-0}
 CHANNEL = development
 # TODO(ik): Update CLIENT_DIR to client_v2 for new frontend migration
 CLIENT_DIR = client
+CLIENT_V2_DIR = client_v2
 DEPLOY_SCRIPT_PATH = not/a/real/path
 DIST_DIR = dist
 GOAMD64 = v1
@@ -31,7 +32,9 @@ GPG_KEY = devteam@adguard.com
 GPG_KEY_PASSPHRASE = not-a-real-password
 NPM = npm
 NPM_FLAGS = --prefix $(CLIENT_DIR)
+NPM_FLAGS_V2 = --prefix $(CLIENT_V2_DIR)
 NPM_INSTALL_FLAGS = $(NPM_FLAGS) --quiet --no-progress
+NPM_INSTALL_FLAGS_V2 = $(NPM_FLAGS_V2) --quiet --no-progress
 RACE = 0
 REVISION = $${REVISION:-$$(git rev-parse --short HEAD)}
 SIGN = 1
@@ -108,8 +111,12 @@ build-release: $(BUILD_RELEASE_DEPS_$(FRONTEND_PREBUILT))
 	$(ENV) "$(SHELL)" ./scripts/make/build-release.sh
 
 .PHONY: js-build js-deps js-typecheck js-lint js-test js-test-e2e
-js-build:     ; $(NPM) $(NPM_FLAGS) run build-prod
-js-deps:      ; $(NPM) $(NPM_INSTALL_FLAGS) ci
+js-build:
+	$(NPM) $(NPM_FLAGS) run build-prod
+	$(NPM) $(NPM_FLAGS_V2) run build-preview
+js-deps:
+	$(NPM) $(NPM_INSTALL_FLAGS) ci
+	$(NPM) $(NPM_INSTALL_FLAGS_V2) ci
 js-typecheck: ; $(NPM) $(NPM_FLAGS) run typecheck
 js-lint:      ; $(NPM) $(NPM_FLAGS) run lint
 js-test:      ; $(NPM) $(NPM_FLAGS) run test

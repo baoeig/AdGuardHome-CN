@@ -1,6 +1,6 @@
 import type { LocalesType } from 'panel/common/intl';
 
-const BASE_URL = 'control';
+const BASE_URL = '/control';
 
 import { getPathWithQueryString } from '../helpers/helpers';
 import { QUERY_LOGS_PAGE_LIMIT, HTML_PAGES, R_PATH_LAST_PART, THEMES } from '../helpers/constants';
@@ -52,10 +52,10 @@ class Api {
                     pathname !== HTML_PAGES.LOGIN && pathname !== HTML_PAGES.INSTALL;
 
                 if (response.status === 403 && shouldRedirect) {
-                    const loginPageUrl = window.location.href.replace(
-                        R_PATH_LAST_PART,
-                        HTML_PAGES.LOGIN,
-                    );
+                    const loginPageUrl =
+                        pathname.startsWith('/client_v2/')
+                            ? HTML_PAGES.LOGIN
+                            : window.location.href.replace(R_PATH_LAST_PART, HTML_PAGES.LOGIN);
                     window.location.replace(loginPageUrl);
                     return false;
                 }

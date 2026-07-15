@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -86,4 +87,66 @@ func TestGFWListManagerDomainCountUsesSnapshot(t *testing.T) {
 		"example.com": {},
 		"example.org": {},
 	}, snapshot)
+}
+
+func TestHandleGFWListAddDomainsNoChange(t *testing.T) {
+	conf := &GFWListConfig{
+		CustomDomains: []string{"example.org"},
+	}
+	s := &Server{
+		logger: testLogger,
+		conf: ServerConfig{
+			Config: Config{
+				GFWList: conf,
+			},
+		},
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/control/gfwlist/domains/add",
+		strings.NewReader(`{"domains":["example.org"]}`),
+	)
+	w := httptest.NewRecorder()
+
+	s.handleGFWListAddDomains(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var got jsonGFWListDomainResp
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, 0, got.AddedCount)
+	assert.Equal(t, 1, got.CustomDomainsTotal)
+	assert.Equal(t, []string{"example.org"}, conf.CustomDomains)
+}
+
+func TestHandleGFWListRemoveDomainsNoChange(t *testing.T) {
+	conf := &GFWListConfig{
+		CustomDomains: []string{"example.org"},
+	}
+	s := &Server{
+		logger: testLogger,
+		conf: ServerConfig{
+			Config: Config{
+				GFWList: conf,
+			},
+		},
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/control/gfwlist/domains/remove",
+		strings.NewReader(`{"domains":["missing.example"]}`),
+	)
+	w := httptest.NewRecorder()
+
+	s.handleGFWListRemoveDomains(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var got jsonGFWListDomainResp
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, 0, got.RemovedCount)
+	assert.Equal(t, 1, got.CustomDomainsTotal)
+	assert.Equal(t, []string{"example.org"}, conf.CustomDomains)
 }
