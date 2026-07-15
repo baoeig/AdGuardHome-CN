@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/AdguardTeam/AdGuardHome/internal/aghhttp"
@@ -24,6 +25,12 @@ type jsonGFWListStatus struct {
 
 	// CustomDomains is the list of user-defined split routing domains.
 	CustomDomains []string `json:"custom_domains"`
+
+	// CustomDomainsTotal is the total number of custom domains.
+	CustomDomainsTotal int `json:"custom_domains_total"`
+
+	// CustomDomainPage is the zero-based page index returned by the server.
+	CustomDomainPage int `json:"custom_domain_page"`
 
 	// DomainCount is the total number of domains (GFW list + custom).
 	DomainCount int `json:"domain_count"`
@@ -53,6 +60,18 @@ type jsonGFWListDomainReq struct {
 	Domains []string `json:"domains"`
 }
 
+// jsonGFWListDomainResp is the JSON response for modifying custom domains.
+type jsonGFWListDomainResp struct {
+	// AddedCount is the number of newly added domains.
+	AddedCount int `json:"added_count,omitempty"`
+
+	// RemovedCount is the number of removed domains.
+	RemovedCount int `json:"removed_count,omitempty"`
+
+	// CustomDomainsTotal is the total number of custom domains after update.
+	CustomDomainsTotal int `json:"custom_domains_total"`
+}
+
 // jsonGFWListCheckResp is the JSON response for checking a domain against the
 // GFW list split-routing rules.
 type jsonGFWListCheckResp struct {
@@ -70,11 +89,17 @@ type jsonGFWListCheckResp struct {
 func (s *Server) handleGFWListStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	s.serverLock.RLock()
-	defer s.serverLock.RUnlock()
+	page, pageSize, err := parseGFWListDomainPage(r)
+	if err != nil {
+		aghhttp.WriteJSONResponseError(ctx, s.logger, w, r, err)
 
+		return
+	}
+
+	s.serverLock.RLock()
 	conf := s.conf.GFWList
 	if conf == nil {
+		s.serverLock.RUnlock()
 		aghhttp.WriteJSONResponseOK(ctx, s.logger, w, r, &jsonGFWListStatus{})
 
 		return
@@ -85,14 +110,25 @@ func (s *Server) handleGFWListStatus(w http.ResponseWriter, r *http.Request) {
 		domainCount = s.gfwlist.domainCount()
 	}
 
-	resp := &jsonGFWListStatus{
-		Enabled:        conf.Enabled,
-		URL:            conf.URL,
-		UpstreamDNS:    slices.Clone(conf.UpstreamDNS),
-		CustomDomains:  slices.Clone(conf.CustomDomains),
-		DomainCount:    domainCount,
-		UpdateInterval: int(time.Duration(s.conf.GFWList.UpdateInterval).Seconds()),
+	customDomains := conf.CustomDomains
+	customDomainPage := 0
+	if pageSize > 0 {
+		customDomains, customDomainPage = paginateGFWListCustomDomains(customDomains, page, pageSize)
+	} else {
+		customDomains = slices.Clone(customDomains)
 	}
+
+	resp := &jsonGFWListStatus{
+		Enabled:            conf.Enabled,
+		URL:                conf.URL,
+		UpstreamDNS:        slices.Clone(conf.UpstreamDNS),
+		CustomDomains:      customDomains,
+		CustomDomainsTotal: len(conf.CustomDomains),
+		CustomDomainPage:   customDomainPage,
+		DomainCount:        domainCount,
+		UpdateInterval:     int(time.Duration(conf.UpdateInterval).Seconds()),
+	}
+	s.serverLock.RUnlock()
 
 	aghhttp.WriteJSONResponseOK(ctx, s.logger, w, r, resp)
 }
@@ -204,7 +240,8 @@ func (s *Server) handleGFWListAddDomains(w http.ResponseWriter, r *http.Request)
 	}
 
 	s.serverLock.Lock()
-	s.addGFWListCustomDomainsLocked(req.Domains)
+	addedCount := s.addGFWListCustomDomainsLocked(req.Domains)
+	customDomainsTotal := len(s.conf.GFWList.CustomDomains)
 	s.serverLock.Unlock()
 
 	s.conf.ConfModifier.Apply(ctx)
@@ -216,7 +253,10 @@ func (s *Server) handleGFWListAddDomains(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	aghhttp.WriteJSONResponseOK(ctx, s.logger, w, r, &struct{}{})
+	aghhttp.WriteJSONResponseOK(ctx, s.logger, w, r, &jsonGFWListDomainResp{
+		AddedCount:         addedCount,
+		CustomDomainsTotal: customDomainsTotal,
+	})
 }
 
 // handleGFWListRemoveDomains handles POST /control/gfwlist/domains/remove
@@ -233,23 +273,14 @@ func (s *Server) handleGFWListRemoveDomains(w http.ResponseWriter, r *http.Reque
 
 	s.serverLock.Lock()
 
+	removedCount := 0
 	if s.conf.GFWList != nil {
-		toRemove := make(map[string]struct{}, len(req.Domains))
-		for _, d := range req.Domains {
-			d = normalizeGFWDomainRule(d)
-			if d != "" {
-				toRemove[d] = struct{}{}
-			}
-		}
+		removedCount = s.removeGFWListCustomDomainsLocked(req.Domains)
+	}
 
-		s.conf.GFWList.CustomDomains = slices.DeleteFunc(
-			s.conf.GFWList.CustomDomains,
-			func(d string) bool {
-				_, ok := toRemove[normalizeGFWDomainRule(d)]
-
-				return ok
-			},
-		)
+	customDomainsTotal := 0
+	if s.conf.GFWList != nil {
+		customDomainsTotal = len(s.conf.GFWList.CustomDomains)
 	}
 
 	s.serverLock.Unlock()
@@ -263,30 +294,87 @@ func (s *Server) handleGFWListRemoveDomains(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	aghhttp.WriteJSONResponseOK(ctx, s.logger, w, r, &struct{}{})
+	aghhttp.WriteJSONResponseOK(ctx, s.logger, w, r, &jsonGFWListDomainResp{
+		RemovedCount:       removedCount,
+		CustomDomainsTotal: customDomainsTotal,
+	})
 }
 
 // addGFWListCustomDomainsLocked adds normalized domains to the GFW list
 // configuration.  s.serverLock must be held.
-func (s *Server) addGFWListCustomDomainsLocked(domains []string) {
+func (s *Server) addGFWListCustomDomainsLocked(domains []string) (added int) {
 	if s.conf.GFWList == nil {
 		s.conf.GFWList = &GFWListConfig{}
 	}
 
-	existing := normalizeGFWDomainRules(s.conf.GFWList.CustomDomains)
-	for _, domain := range domains {
-		domain = normalizeGFWDomainRule(domain)
-		if domain == "" {
-			continue
-		}
+	added = s.conf.GFWList.addCustomDomains(domains)
 
-		if _, ok := existing[domain]; ok {
-			continue
-		}
+	return added
+}
 
-		s.conf.GFWList.CustomDomains = append(s.conf.GFWList.CustomDomains, domain)
-		existing[domain] = struct{}{}
+// removeGFWListCustomDomainsLocked removes normalized domains from the GFW list
+// configuration.  s.serverLock must be held.
+func (s *Server) removeGFWListCustomDomainsLocked(domains []string) (removed int) {
+	if s.conf.GFWList == nil {
+		return 0
 	}
+
+	return s.conf.GFWList.removeCustomDomains(domains)
+}
+
+// parseGFWListDomainPage parses custom domain pagination query parameters.
+func parseGFWListDomainPage(r *http.Request) (page, pageSize int, err error) {
+	page, err = parseNonNegativeIntQuery(r, "custom_domain_page")
+	if err != nil {
+		return 0, 0, err
+	}
+
+	pageSize, err = parseNonNegativeIntQuery(r, "custom_domain_page_size")
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return page, pageSize, nil
+}
+
+// parseNonNegativeIntQuery parses a non-negative integer query parameter.
+func parseNonNegativeIntQuery(r *http.Request, key string) (int, error) {
+	value := r.URL.Query().Get(key)
+	if value == "" {
+		return 0, nil
+	}
+
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s: %w", key, err)
+	}
+	if n < 0 {
+		return 0, fmt.Errorf("invalid %s: must be non-negative", key)
+	}
+
+	return n, nil
+}
+
+// paginateGFWListCustomDomains returns the requested page of domains and the
+// zero-based page index actually used after clamping.
+func paginateGFWListCustomDomains(domains []string, page, pageSize int) (pageDomains []string, actualPage int) {
+	total := len(domains)
+	if pageSize <= 0 || total == 0 {
+		return slices.Clone(domains), 0
+	}
+
+	maxPage := (total - 1) / pageSize
+	if page > maxPage {
+		page = maxPage
+	}
+
+	start := page * pageSize
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+
+	return slices.Clone(domains[start:end]), page
 }
 
 // handleGFWListCheck handles GET /control/gfwlist/check requests.

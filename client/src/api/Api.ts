@@ -710,10 +710,11 @@ class Api {
 
     CHECK_GFWLIST_DOMAIN = { path: 'gfwlist/check', method: 'GET' };
 
-    getGfwListStatus() {
+    getGfwListStatus(params?: { custom_domain_page?: number; custom_domain_page_size?: number }) {
         const { path, method } = this.GET_GFWLIST_STATUS;
+        const url = params && Object.keys(params).length > 0 ? getPathWithQueryString(path, params) : path;
 
-        return this.makeRequest(path, method);
+        return this.makeRequest(url, method);
     }
 
     setGfwListConfig(data: any) {

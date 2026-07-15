@@ -44,6 +44,9 @@ type GFWListConfig struct {
 	// CustomDomains is the list of user-defined domains that should also use
 	// the GFW list upstream DNS servers.
 	CustomDomains []string `yaml:"custom_domains"`
+
+	// customDomainsSet caches normalized custom domains for fast deduplication.
+	customDomainsSet map[string]struct{} `yaml:"-"`
 }
 
 // defaultGFWListUpdateInterval is the default update interval for the GFW list.
@@ -67,6 +70,9 @@ type gfwlistManager struct {
 
 	// customDomains is the normalized set of user-defined domains.
 	customDomains map[string]struct{}
+
+	// totalDomainCount is the total number of GFW list and custom domains.
+	totalDomainCount int
 
 	// conf is the current configuration.
 	conf *GFWListConfig
@@ -92,15 +98,17 @@ func newGFWListManager(
 	onUpdate func(ctx context.Context, domains map[string]struct{}),
 ) *gfwlistManager {
 	conf = cloneGFWListConfig(conf)
+	customDomains := normalizeGFWDomainRules(conf.CustomDomains)
 
 	return &gfwlistManager{
-		logger:        l,
-		domains:       make(map[string]struct{}),
-		customDomains: normalizeGFWDomainRules(conf.CustomDomains),
-		conf:          conf,
-		dataDir:       dataDir,
-		stopCh:        make(chan struct{}),
-		onUpdate:      onUpdate,
+		logger:           l,
+		domains:          make(map[string]struct{}),
+		customDomains:    customDomains,
+		totalDomainCount: len(customDomains),
+		conf:             conf,
+		dataDir:          dataDir,
+		stopCh:           make(chan struct{}),
+		onUpdate:         onUpdate,
 	}
 }
 
@@ -138,6 +146,89 @@ func normalizeGFWDomainRules(rules []string) (domains map[string]struct{}) {
 	return domains
 }
 
+// ensureCustomDomainsSet normalizes custom domains once and caches the result.
+// It returns the cached set for fast deduplication.
+func (conf *GFWListConfig) ensureCustomDomainsSet() (domains map[string]struct{}) {
+	if conf.customDomainsSet != nil {
+		return conf.customDomainsSet
+	}
+
+	domains = make(map[string]struct{}, len(conf.CustomDomains))
+	normalized := make([]string, 0, len(conf.CustomDomains))
+	for _, rule := range conf.CustomDomains {
+		domain := normalizeGFWDomainRule(rule)
+		if domain == "" {
+			continue
+		}
+
+		if _, ok := domains[domain]; ok {
+			continue
+		}
+
+		domains[domain] = struct{}{}
+		normalized = append(normalized, domain)
+	}
+
+	conf.CustomDomains = normalized
+	conf.customDomainsSet = domains
+
+	return domains
+}
+
+// addCustomDomains adds normalized domains to the configuration.  It returns
+// the number of newly added domains.
+func (conf *GFWListConfig) addCustomDomains(domains []string) (added int) {
+	existing := conf.ensureCustomDomainsSet()
+	for _, rule := range domains {
+		domain := normalizeGFWDomainRule(rule)
+		if domain == "" {
+			continue
+		}
+
+		if _, ok := existing[domain]; ok {
+			continue
+		}
+
+		conf.CustomDomains = append(conf.CustomDomains, domain)
+		existing[domain] = struct{}{}
+		added++
+	}
+
+	return added
+}
+
+// removeCustomDomains removes normalized domains from the configuration.  It
+// returns the number of removed domains.
+func (conf *GFWListConfig) removeCustomDomains(domains []string) (removed int) {
+	existing := conf.ensureCustomDomainsSet()
+	toRemove := make(map[string]struct{}, len(domains))
+	for _, rule := range domains {
+		domain := normalizeGFWDomainRule(rule)
+		if domain != "" {
+			toRemove[domain] = struct{}{}
+		}
+	}
+
+	if len(toRemove) == 0 {
+		return 0
+	}
+
+	filtered := conf.CustomDomains[:0]
+	for _, domain := range conf.CustomDomains {
+		if _, ok := toRemove[domain]; ok {
+			delete(existing, domain)
+			removed++
+			continue
+		}
+
+		filtered = append(filtered, domain)
+	}
+
+	conf.CustomDomains = filtered
+
+	return removed
+}
+
 // setDomains replaces m's downloaded GFW list domains.  It takes ownership of
 // domains, which must not be mutated after calling setDomains.
 func (m *gfwlistManager) setDomains(domains map[string]struct{}) {
@@ -145,6 +236,13 @@ func (m *gfwlistManager) setDomains(domains map[string]struct{}) {
 	defer m.mu.Unlock()
 
 	m.domains = domains
+
+	m.totalDomainCount = len(domains)
+	for d := range m.customDomains {
+		if _, exists := m.domains[d]; !exists {
+			m.totalDomainCount++
+		}
+	}
 }
 
 // domainSnapshot returns a copy of m's downloaded GFW list domains.
@@ -452,14 +550,7 @@ func (m *gfwlistManager) domainCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	count := len(m.domains)
-	for d := range m.customDomains {
-		if _, exists := m.domains[d]; !exists {
-			count++
-		}
-	}
-
-	return count
+	return m.totalDomainCount
 }
 
 // hasDomains reports whether m has any GFW list or custom domains.

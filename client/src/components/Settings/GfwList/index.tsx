@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import Card from '../../ui/Card';
@@ -12,6 +12,8 @@ interface GfwListStatus {
     url: string;
     upstream_dns: string[];
     custom_domains: string[];
+    custom_domains_total: number;
+    custom_domain_page: number;
     domain_count: number;
     update_interval: number;
 }
@@ -27,6 +29,8 @@ const DEFAULT_STATUS: GfwListStatus = {
     url: '',
     upstream_dns: [],
     custom_domains: [],
+    custom_domains_total: 0,
+    custom_domain_page: 0,
     domain_count: 0,
     update_interval: 86400,
 };
@@ -136,14 +140,11 @@ const GfwList = () => {
     const [liveDomainCount, setLiveDomainCount] = useState(0);
 
     const customDomains = status.custom_domains || [];
-    const customDomainPageCount = Math.max(1, Math.ceil(customDomains.length / CUSTOM_DOMAIN_PAGE_SIZE));
+    const customDomainsTotal = status.custom_domains_total ?? customDomains.length;
+    const customDomainPageCount = Math.max(1, Math.ceil(customDomainsTotal / CUSTOM_DOMAIN_PAGE_SIZE));
     const safeCustomDomainPage = Math.min(customDomainPage, customDomainPageCount - 1);
     const customDomainStart = safeCustomDomainPage * CUSTOM_DOMAIN_PAGE_SIZE;
-    const customDomainEnd = Math.min(customDomainStart + CUSTOM_DOMAIN_PAGE_SIZE, customDomains.length);
-    const visibleCustomDomains = useMemo(
-        () => customDomains.slice(customDomainStart, customDomainEnd),
-        [customDomains, customDomainStart, customDomainEnd],
-    );
+    const customDomainEnd = Math.min(customDomainStart + customDomains.length, customDomainsTotal);
 
     const showSuccess = (msg: string) => {
         setSuccessMsg(msg);
@@ -156,15 +157,19 @@ const GfwList = () => {
         setSuccessMsg('');
     };
 
-    const fetchStatus = async () => {
+    const fetchStatus = async (page = customDomainPage) => {
         try {
-            const data: GfwListStatus = await apiClient.getGfwListStatus();
+            const data: GfwListStatus = await apiClient.getGfwListStatus({
+                custom_domain_page: page,
+                custom_domain_page_size: CUSTOM_DOMAIN_PAGE_SIZE,
+            });
             setStatus(data);
             setLiveDomainCount(data.domain_count);
             setEnabled(data.enabled ?? false);
             setUrl(data.url || '');
             setUpstreamDns((data.upstream_dns || []).join('\n'));
             setUpdateInterval(data.update_interval || 86400);
+            setCustomDomainPage(data.custom_domain_page ?? page);
             return data;
         } catch (e: any) {
             showError(t('gfwlist_load_error', { error: e.message }));
@@ -175,7 +180,7 @@ const GfwList = () => {
     };
 
     useEffect(() => {
-        fetchStatus();
+        fetchStatus(0);
     }, []);
 
     useEffect(() => {
@@ -198,7 +203,7 @@ const GfwList = () => {
                 update_interval: updateInterval,
             });
 
-            await fetchStatus();
+            await fetchStatus(customDomainPage);
             showSuccess(t('gfwlist_config_saved'));
         } catch (e: any) {
             showError(t('gfwlist_save_error', { error: e.message }));
@@ -213,13 +218,6 @@ const GfwList = () => {
             const data = await apiClient.updateGfwList();
             const newCount = data?.domain_count ?? 0;
 
-            // Update domain count immediately from the response.
-            setLiveDomainCount(newCount);
-
-            // Also refresh full status to keep everything in sync.  Keep the
-            // update response count afterwards, because it is the authoritative
-            // total immediately after a list update.
-            await fetchStatus();
             setLiveDomainCount(newCount);
 
             showSuccess(t('gfwlist_updated', { count: newCount }));
@@ -245,18 +243,14 @@ const GfwList = () => {
         // Validate each domain.
         const validDomains: string[] = [];
         const errors: string[] = [];
-        const currentDomains = new Set(
-            (status.custom_domains || []).map((d) => normalizeGfwDomainRule(d)).filter(Boolean),
-        );
 
         candidates.forEach((rule) => {
             const domain = normalizeGfwDomainRule(rule);
-            const err = validateDomainRule(rule, currentDomains);
+            const err = validateDomainRule(rule);
             if (err) {
                 errors.push(`${rule}: ${t(err)}`);
             } else {
                 validDomains.push(domain);
-                currentDomains.add(domain);
             }
         });
 
@@ -269,25 +263,24 @@ const GfwList = () => {
 
         setDomainError('');
         try {
-            await apiClient.addGfwListDomains(validDomains);
-            setNewDomain('');
-            const updatedStatus = await fetchStatus();
-            const customDomainCount = updatedStatus?.custom_domains?.length ?? 0;
-            setCustomDomainPage(Math.max(0, Math.ceil(customDomainCount / CUSTOM_DOMAIN_PAGE_SIZE) - 1));
+            const res = await apiClient.addGfwListDomains(validDomains);
+            const addedCount = res?.added_count ?? validDomains.length;
+            const customDomainsTotal = res?.custom_domains_total ?? status.custom_domains_total ?? 0;
+            const targetPage = Math.max(0, Math.ceil(customDomainsTotal / CUSTOM_DOMAIN_PAGE_SIZE) - 1);
 
-            if (errors.length > 0) {
+            setNewDomain('');
+            await fetchStatus(targetPage);
+
+            const skippedCount = errors.length + (validDomains.length - addedCount);
+            if (skippedCount > 0) {
                 showSuccess(
                     t('gfwlist_domains_partial', {
-                        added: validDomains.length,
-                        skipped: errors.length,
+                        added: addedCount,
+                        skipped: skippedCount,
                     }),
                 );
             } else {
-                showSuccess(
-                    validDomains.length > 1
-                        ? t('gfwlist_domains_added', { count: validDomains.length })
-                        : t('gfwlist_domain_added'),
-                );
+                showSuccess(addedCount > 1 ? t('gfwlist_domains_added', { count: addedCount }) : t('gfwlist_domain_added'));
             }
         } catch (e: any) {
             showError(t('gfwlist_save_error', { error: e.message }));
@@ -296,8 +289,14 @@ const GfwList = () => {
 
     const handleRemoveDomain = async (domain: string) => {
         try {
-            await apiClient.removeGfwListDomains([domain]);
-            await fetchStatus();
+            const res = await apiClient.removeGfwListDomains([domain]);
+            const customDomainsTotal = res?.custom_domains_total ?? status.custom_domains_total ?? 0;
+            const nextPage = Math.min(
+                customDomainPage,
+                Math.max(0, Math.ceil(customDomainsTotal / CUSTOM_DOMAIN_PAGE_SIZE) - 1),
+            );
+
+            await fetchStatus(nextPage);
             showSuccess(t('gfwlist_domain_removed'));
         } catch (e: any) {
             showError(t('gfwlist_save_error', { error: e.message }));
@@ -502,7 +501,7 @@ const GfwList = () => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {visibleCustomDomains.map((d) => (
+                                {customDomains.map((d) => (
                                     <tr key={d}>
                                         <td>{d}</td>
                                         <td className="text-right">
@@ -524,7 +523,7 @@ const GfwList = () => {
                                 {t('gfwlist_custom_domains_page_info', {
                                     from: customDomainStart + 1,
                                     to: customDomainEnd,
-                                    total: customDomains.length,
+                                    total: customDomainsTotal,
                                 })}
                             </div>
 
@@ -535,7 +534,9 @@ const GfwList = () => {
                                             type="button"
                                             className="page-link"
                                             disabled={safeCustomDomainPage === 0}
-                                            onClick={() => setCustomDomainPage((page) => Math.max(0, page - 1))}
+                                            onClick={() => {
+                                                fetchStatus(Math.max(0, safeCustomDomainPage - 1));
+                                            }}
                                         >
                                             {t('previous_btn')}
                                         </button>
@@ -554,11 +555,11 @@ const GfwList = () => {
                                             type="button"
                                             className="page-link"
                                             disabled={safeCustomDomainPage >= customDomainPageCount - 1}
-                                            onClick={() =>
-                                                setCustomDomainPage((page) =>
-                                                    Math.min(customDomainPageCount - 1, page + 1),
-                                                )
-                                            }
+                                            onClick={() => {
+                                                fetchStatus(
+                                                    Math.min(customDomainPageCount - 1, safeCustomDomainPage + 1),
+                                                );
+                                            }}
                                         >
                                             {t('next_btn')}
                                         </button>

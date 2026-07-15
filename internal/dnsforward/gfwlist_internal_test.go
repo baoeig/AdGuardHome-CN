@@ -189,7 +189,7 @@ func TestGFWListManagerCheckDomain(t *testing.T) {
 		CustomDomains: []string{"custom.example.net"},
 	}
 	m := newGFWListManager(testLogger, conf, t.TempDir(), nil)
-	m.domains["example.org"] = struct{}{}
+	m.setDomains(map[string]struct{}{"example.org": {}})
 
 	matched, source := m.checkDomain("sub.example.org")
 	assert.True(t, matched)
@@ -213,7 +213,7 @@ func TestGFWListManagerDomainCountDeduplicatesCustomDomains(t *testing.T) {
 		CustomDomains: []string{"example.org", "custom.example.net"},
 	}
 	m := newGFWListManager(testLogger, conf, t.TempDir(), nil)
-	m.domains["example.org"] = struct{}{}
+	m.setDomains(map[string]struct{}{"example.org": {}})
 
 	assert.Equal(t, 2, m.domainCount())
 }
@@ -242,8 +242,10 @@ func TestGFWListManagerApplyToUpstreamConfig(t *testing.T) {
 		CustomDomains: []string{"example.org", "custom.example.net"},
 	}
 	m := newGFWListManager(testLogger, conf, t.TempDir(), nil)
-	m.domains["example.org"] = struct{}{}
-	m.domains["example.com"] = struct{}{}
+	m.setDomains(map[string]struct{}{
+		"example.org": {},
+		"example.com": {},
+	})
 
 	uc := &proxy.UpstreamConfig{}
 	err := m.applyToUpstreamConfig(t.Context(), uc, &upstream.Options{
