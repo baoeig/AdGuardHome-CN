@@ -781,6 +781,7 @@
   "gfwlist_custom_domains": "自定义域名",
   "gfwlist_custom_domains_desc": "添加额外的域名，使其也通过 GFW 列表的上游 DNS 服务器进行解析（不依赖 GFW 列表本身）。",
   "gfwlist_custom_domains_hint": "每行输入一条规则。支持普通域名、通配符、Adblock 域名规则、URL 规则和 Hosts 文件行。",
+  "gfwlist_custom_domains_page_info": "显示第 {{from}}-{{to}} 条，共 {{total}} 条自定义域名",
   "gfwlist_no_custom_domains": "尚未添加自定义域名。",
   "gfwlist_add_domain": "添加",
   "gfwlist_domain_added": "域名添加成功",

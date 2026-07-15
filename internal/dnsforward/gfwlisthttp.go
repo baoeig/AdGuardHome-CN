@@ -134,6 +134,8 @@ func (s *Server) handleGFWListSetConfig(w http.ResponseWriter, r *http.Request) 
 
 	s.serverLock.Unlock()
 
+	s.conf.ConfModifier.Apply(ctx)
+
 	// Trigger a reconfigure to apply changes.
 	if err := s.Reconfigure(ctx, nil); err != nil {
 		aghhttp.WriteJSONResponseError(ctx, s.logger, w, r, err)
@@ -158,8 +160,20 @@ func (s *Server) handleGFWListUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := gfwMgr.update(ctx); err != nil {
+	domains, err := gfwMgr.update(ctx)
+	if err != nil {
 		aghhttp.WriteJSONResponseError(ctx, s.logger, w, r, err)
+
+		return
+	}
+	if !s.setPendingGFWListDomains(gfwMgr, domains) {
+		aghhttp.WriteJSONResponseError(
+			ctx,
+			s.logger,
+			w,
+			r,
+			fmt.Errorf("gfwlist configuration changed while updating"),
+		)
 
 		return
 	}
@@ -197,7 +211,10 @@ func (s *Server) handleGFWListAddDomains(w http.ResponseWriter, r *http.Request)
 
 	existing := make(map[string]struct{}, len(s.conf.GFWList.CustomDomains))
 	for _, d := range s.conf.GFWList.CustomDomains {
-		existing[d] = struct{}{}
+		d = normalizeGFWDomainRule(d)
+		if d != "" {
+			existing[d] = struct{}{}
+		}
 	}
 
 	for _, d := range req.Domains {
@@ -213,6 +230,8 @@ func (s *Server) handleGFWListAddDomains(w http.ResponseWriter, r *http.Request)
 	}
 
 	s.serverLock.Unlock()
+
+	s.conf.ConfModifier.Apply(ctx)
 
 	// Reconfigure to apply.
 	if err := s.Reconfigure(ctx, nil); err != nil {
@@ -241,7 +260,10 @@ func (s *Server) handleGFWListRemoveDomains(w http.ResponseWriter, r *http.Reque
 	if s.conf.GFWList != nil {
 		toRemove := make(map[string]struct{}, len(req.Domains))
 		for _, d := range req.Domains {
-			toRemove[normalizeGFWDomainRule(d)] = struct{}{}
+			d = normalizeGFWDomainRule(d)
+			if d != "" {
+				toRemove[d] = struct{}{}
+			}
 		}
 
 		s.conf.GFWList.CustomDomains = slices.DeleteFunc(
@@ -255,6 +277,8 @@ func (s *Server) handleGFWListRemoveDomains(w http.ResponseWriter, r *http.Reque
 	}
 
 	s.serverLock.Unlock()
+
+	s.conf.ConfModifier.Apply(ctx)
 
 	// Reconfigure to apply.
 	if err := s.Reconfigure(ctx, nil); err != nil {

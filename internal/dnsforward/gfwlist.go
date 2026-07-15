@@ -2,6 +2,7 @@ package dnsforward
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +20,7 @@ import (
 	"github.com/AdguardTeam/dnsproxy/proxy"
 	"github.com/AdguardTeam/dnsproxy/upstream"
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
+	"github.com/AdguardTeam/golibs/netutil"
 	"github.com/AdguardTeam/golibs/timeutil"
 )
 
@@ -49,6 +52,9 @@ const defaultGFWListUpdateInterval = 24 * time.Hour
 // gfwlistCacheFile is the filename used to cache the GFW list locally.
 const gfwlistCacheFile = "gfwlist_cache.txt"
 
+// maxGFWListSize is the maximum accepted GFW list response size.
+const maxGFWListSize = 16 * 1024 * 1024
+
 // gfwlistManager manages the GFW list download, parsing, and domain matching.
 type gfwlistManager struct {
 	logger *slog.Logger
@@ -58,6 +64,9 @@ type gfwlistManager struct {
 
 	// domains is the set of domains parsed from the GFW list.
 	domains map[string]struct{}
+
+	// customDomains is the normalized set of user-defined domains.
+	customDomains map[string]struct{}
 
 	// conf is the current configuration.
 	conf *GFWListConfig
@@ -70,31 +79,100 @@ type gfwlistManager struct {
 
 	// stopOnce ensures stopCh is closed only once.
 	stopOnce sync.Once
+
+	// onUpdate is called after a successful background update.
+	onUpdate func(ctx context.Context, domains map[string]struct{})
 }
 
 // newGFWListManager creates a new gfwlistManager.  l and conf must not be nil.
-func newGFWListManager(l *slog.Logger, conf *GFWListConfig, dataDir string) *gfwlistManager {
+func newGFWListManager(
+	l *slog.Logger,
+	conf *GFWListConfig,
+	dataDir string,
+	onUpdate func(ctx context.Context, domains map[string]struct{}),
+) *gfwlistManager {
+	conf = cloneGFWListConfig(conf)
+
 	return &gfwlistManager{
-		logger:  l,
-		domains: make(map[string]struct{}),
-		conf:    conf,
-		dataDir: dataDir,
-		stopCh:  make(chan struct{}),
+		logger:        l,
+		domains:       make(map[string]struct{}),
+		customDomains: normalizeGFWDomainRules(conf.CustomDomains),
+		conf:          conf,
+		dataDir:       dataDir,
+		stopCh:        make(chan struct{}),
+		onUpdate:      onUpdate,
 	}
 }
 
-// start loads the GFW list from cache (if available) and starts the
-// background updater.  It does not block; network downloads are handled by
-// the background updater goroutine.
-func (m *gfwlistManager) start(ctx context.Context) {
-	// Try loading from cache first so domains are available immediately.
-	if err := m.loadFromCache(ctx); err != nil {
-		m.logger.WarnContext(ctx, "loading gfwlist from cache", slogutil.KeyError, err)
+// cloneGFWListConfig returns an independent copy of conf.
+func cloneGFWListConfig(conf *GFWListConfig) (clone *GFWListConfig) {
+	return &GFWListConfig{
+		Enabled:        conf.Enabled,
+		URL:            conf.URL,
+		UpstreamDNS:    slices.Clone(conf.UpstreamDNS),
+		UpdateInterval: conf.UpdateInterval,
+		CustomDomains:  slices.Clone(conf.CustomDomains),
+	}
+}
+
+// cloneGFWListDomains returns an independent copy of domains.
+func cloneGFWListDomains(domains map[string]struct{}) (clone map[string]struct{}) {
+	clone = make(map[string]struct{}, len(domains))
+	for d := range domains {
+		clone[d] = struct{}{}
 	}
 
-	m.logger.InfoContext(ctx, "gfwlist loaded from cache", "domains", m.domainCount())
+	return clone
+}
 
-	// Start background updater — it will fetch from network on the first tick.
+// normalizeGFWDomainRules returns the normalized domain set for rules.
+func normalizeGFWDomainRules(rules []string) (domains map[string]struct{}) {
+	domains = make(map[string]struct{}, len(rules))
+	for _, rule := range rules {
+		domain := normalizeGFWDomainRule(rule)
+		if domain != "" {
+			domains[domain] = struct{}{}
+		}
+	}
+
+	return domains
+}
+
+// setDomains replaces m's downloaded GFW list domains.  It takes ownership of
+// domains, which must not be mutated after calling setDomains.
+func (m *gfwlistManager) setDomains(domains map[string]struct{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.domains = domains
+}
+
+// domainSnapshot returns a copy of m's downloaded GFW list domains.
+func (m *gfwlistManager) domainSnapshot() (domains map[string]struct{}) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return cloneGFWListDomains(m.domains)
+}
+
+// start initializes domains and starts the background updater.  It does not
+// block; network downloads are handled by the background updater goroutine.
+func (m *gfwlistManager) start(ctx context.Context, domains map[string]struct{}) {
+	if domains != nil {
+		m.setDomains(domains)
+		m.logger.InfoContext(ctx, "gfwlist loaded from memory", "domains", len(domains))
+	} else {
+		// Try loading from cache first so domains are available immediately.
+		if err := m.loadFromCache(ctx); err != nil {
+			m.logger.WarnContext(ctx, "loading gfwlist from cache", slogutil.KeyError, err)
+		}
+	}
+
+	m.logger.InfoContext(ctx, "gfwlist loaded", "domains", m.domainCount())
+
+	// Start background updater.  The current cache is applied during
+	// preparation; later successful updates trigger a reconfigure through
+	// m.onUpdate.
 	interval := time.Duration(m.conf.UpdateInterval)
 	if interval <= 0 {
 		interval = defaultGFWListUpdateInterval
@@ -110,17 +188,8 @@ func (m *gfwlistManager) stop() {
 	})
 }
 
-// backgroundUpdater downloads the GFW list once immediately, then repeats
-// on every interval tick.
+// backgroundUpdater downloads the GFW list on every interval tick.
 func (m *gfwlistManager) backgroundUpdater(ctx context.Context, interval time.Duration) {
-	// Do an immediate download so the list is fresh after (re)start,
-	// without waiting for the first full interval to elapse.
-	if err := m.update(ctx); err != nil {
-		m.logger.WarnContext(ctx, "updating gfwlist (initial)", slogutil.KeyError, err)
-	} else {
-		m.logger.InfoContext(ctx, "gfwlist updated (initial)", "domains", m.domainCount())
-	}
-
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -129,19 +198,28 @@ func (m *gfwlistManager) backgroundUpdater(ctx context.Context, interval time.Du
 		case <-m.stopCh:
 			return
 		case <-ticker.C:
-			if err := m.update(ctx); err != nil {
+			domains, err := m.update(ctx)
+			if err != nil {
 				m.logger.WarnContext(ctx, "updating gfwlist", slogutil.KeyError, err)
 			} else {
 				m.logger.InfoContext(ctx, "gfwlist updated", "domains", m.domainCount())
+				if m.onUpdate != nil {
+					select {
+					case <-m.stopCh:
+						return
+					default:
+						m.onUpdate(ctx, domains)
+					}
+				}
 			}
 		}
 	}
 }
 
 // update downloads and parses the GFW list from the configured URL.
-func (m *gfwlistManager) update(ctx context.Context) (err error) {
+func (m *gfwlistManager) update(ctx context.Context) (domains map[string]struct{}, err error) {
 	if m.conf.URL == "" {
-		return nil
+		return m.domainSnapshot(), nil
 	}
 
 	m.logger.DebugContext(ctx, "downloading gfwlist", "url", m.conf.URL)
@@ -152,52 +230,56 @@ func (m *gfwlistManager) update(ctx context.Context) (err error) {
 
 	req, err := http.NewRequestWithContext(dlCtx, http.MethodGet, m.conf.URL, nil)
 	if err != nil {
-		return fmt.Errorf("creating request: %w", err)
+		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("downloading: %w", err)
+		return nil, fmt.Errorf("downloading: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxGFWListSize+1))
 	if err != nil {
-		return fmt.Errorf("reading response: %w", err)
+		return nil, fmt.Errorf("reading response: %w", err)
+	}
+	if len(body) > maxGFWListSize {
+		return nil, fmt.Errorf("response is too large")
 	}
 
-	domains, err := parseGFWList(body)
+	domains, err = parseGFWList(body)
 	if err != nil {
-		return fmt.Errorf("parsing gfwlist: %w", err)
+		return nil, fmt.Errorf("parsing gfwlist: %w", err)
 	}
 
-	m.mu.Lock()
-	m.domains = domains
-	m.mu.Unlock()
+	m.setDomains(domains)
 
 	// Save to cache.
 	if cacheErr := m.saveToCache(ctx, body); cacheErr != nil {
 		m.logger.WarnContext(ctx, "saving gfwlist cache", slogutil.KeyError, cacheErr)
 	}
 
-	return nil
+	return cloneGFWListDomains(domains), nil
 }
 
 // parseGFWList decodes and parses a base64-encoded AutoProxy format GFW list.
 // It returns a set of domains extracted from the list.
 func parseGFWList(data []byte) (domains map[string]struct{}, err error) {
 	// The GFW list is base64-encoded.
-	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(data)))
+	encoded := bytes.TrimSpace(data)
+	decoded := make([]byte, base64.StdEncoding.DecodedLen(len(encoded)))
+	n, err := base64.StdEncoding.Decode(decoded, encoded)
 	if err != nil {
 		return nil, fmt.Errorf("base64 decoding: %w", err)
 	}
+	decoded = decoded[:n]
 
 	domains = make(map[string]struct{})
-	scanner := bufio.NewScanner(strings.NewReader(string(decoded)))
+	scanner := bufio.NewScanner(bytes.NewReader(decoded))
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -354,38 +436,39 @@ func (m *gfwlistManager) domainCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	return len(m.domains) + len(m.conf.CustomDomains)
+	count := len(m.domains)
+	for d := range m.customDomains {
+		if _, exists := m.domains[d]; !exists {
+			count++
+		}
+	}
+
+	return count
 }
 
-// allDomains returns all domains from both the GFW list and custom list.
-func (m *gfwlistManager) allDomains() []string {
+// hasDomains reports whether m has any GFW list or custom domains.
+func (m *gfwlistManager) hasDomains() (ok bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	result := make([]string, 0, len(m.domains)+len(m.conf.CustomDomains))
-	for d := range m.domains {
-		result = append(result, d)
-	}
-
-	// Append custom domains, deduplicated.
-	for _, d := range m.conf.CustomDomains {
-		d = normalizeDomain(d)
-		if d == "" {
-			continue
-		}
-
-		if _, exists := m.domains[d]; !exists {
-			result = append(result, d)
-		}
-	}
-
-	return result
+	return len(m.domains) > 0 || len(m.customDomains) > 0
 }
 
-// matchDomain returns true if domain exactly matches or is a subdomain of
-// pattern.
-func matchDomain(domain, pattern string) (ok bool) {
-	return domain == pattern || strings.HasSuffix(domain, "."+pattern)
+// matchDomainInSet reports whether domain exactly matches or is a subdomain of
+// a domain in set.
+func matchDomainInSet(domain string, set map[string]struct{}) (ok bool) {
+	for {
+		if _, ok = set[domain]; ok {
+			return true
+		}
+
+		i := strings.IndexByte(domain, '.')
+		if i < 0 {
+			return false
+		}
+
+		domain = domain[i+1:]
+	}
 }
 
 // checkDomain returns true if domain is found in the GFW list or custom domain
@@ -399,17 +482,12 @@ func (m *gfwlistManager) checkDomain(domain string) (matched bool, source string
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	for d := range m.domains {
-		if matchDomain(domain, d) {
-			return true, "gfwlist"
-		}
+	if matchDomainInSet(domain, m.domains) {
+		return true, "gfwlist"
 	}
 
-	for _, d := range m.conf.CustomDomains {
-		d = normalizeGFWDomainRule(d)
-		if d != "" && matchDomain(domain, d) {
-			return true, "custom"
-		}
+	if matchDomainInSet(domain, m.customDomains) {
+		return true, "custom"
 	}
 
 	return false, ""
@@ -432,9 +510,7 @@ func (m *gfwlistManager) loadFromCache(ctx context.Context) (err error) {
 		return fmt.Errorf("parsing cached gfwlist: %w", err)
 	}
 
-	m.mu.Lock()
-	m.domains = domains
-	m.mu.Unlock()
+	m.setDomains(domains)
 
 	m.logger.InfoContext(ctx, "loaded gfwlist from cache", "domains", len(domains))
 
@@ -463,22 +539,16 @@ func (m *gfwlistManager) applyToUpstreamConfig(
 	uc *proxy.UpstreamConfig,
 	opts *upstream.Options,
 ) (err error) {
-	domains := m.allDomains()
-	if len(domains) == 0 || len(m.conf.UpstreamDNS) == 0 {
+	if len(m.conf.UpstreamDNS) == 0 || !m.hasDomains() {
 		return nil
 	}
 
-	// Build the upstream lines in [/domain/]upstream format and parse them.
-	lines := make([]string, 0, len(domains)*len(m.conf.UpstreamDNS))
-	for _, d := range domains {
-		for _, ups := range m.conf.UpstreamDNS {
-			lines = append(lines, fmt.Sprintf("[/%s/]%s", d, ups))
-		}
-	}
-
-	gfwUC, err := proxy.ParseUpstreamsConfig(lines, opts)
+	gfwUC, err := proxy.ParseUpstreamsConfig(m.conf.UpstreamDNS, opts)
 	if err != nil {
 		return fmt.Errorf("parsing gfwlist upstreams: %w", err)
+	}
+	if len(gfwUC.Upstreams) == 0 {
+		return fmt.Errorf("gfwlist upstreams must be plain upstream addresses")
 	}
 
 	// Merge the GFW list domain upstreams into the existing config.
@@ -489,21 +559,69 @@ func (m *gfwlistManager) applyToUpstreamConfig(
 		uc.SpecifiedDomainUpstreams = make(map[string][]upstream.Upstream)
 	}
 
-	for d, ups := range gfwUC.DomainReservedUpstreams {
-		uc.DomainReservedUpstreams[d] = append(uc.DomainReservedUpstreams[d], ups...)
-	}
-	for d, ups := range gfwUC.SpecifiedDomainUpstreams {
-		uc.SpecifiedDomainUpstreams[d] = append(uc.SpecifiedDomainUpstreams[d], ups...)
+	domainCount, err := m.appendToUpstreamConfig(uc, gfwUC.Upstreams)
+	if err != nil {
+		return err
 	}
 
 	m.logger.InfoContext(
 		ctx,
 		"applied gfwlist domains to upstream config",
-		"domain_count", len(domains),
+		"domain_count", domainCount,
 		"upstream_count", len(m.conf.UpstreamDNS),
 	)
 
 	return nil
+}
+
+// appendToUpstreamConfig appends all GFW list and custom domains to uc.
+func (m *gfwlistManager) appendToUpstreamConfig(
+	uc *proxy.UpstreamConfig,
+	ups []upstream.Upstream,
+) (domainCount int, err error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	appendDomain := func(domain string) (err error) {
+		key, keyErr := domainReservedUpstreamKey(domain)
+		if keyErr != nil {
+			return fmt.Errorf("preparing gfwlist domain %q: %w", domain, keyErr)
+		}
+
+		uc.DomainReservedUpstreams[key] = append(uc.DomainReservedUpstreams[key], ups...)
+		uc.SpecifiedDomainUpstreams[key] = append(uc.SpecifiedDomainUpstreams[key], ups...)
+
+		domainCount++
+
+		return nil
+	}
+
+	for d := range m.domains {
+		if err = appendDomain(d); err != nil {
+			return 0, err
+		}
+	}
+	for d := range m.customDomains {
+		if _, exists := m.domains[d]; exists {
+			continue
+		}
+
+		if err = appendDomain(d); err != nil {
+			return 0, err
+		}
+	}
+
+	return domainCount, nil
+}
+
+// domainReservedUpstreamKey returns a domain key in the format used by
+// proxy.UpstreamConfig domain-specific upstream maps.
+func domainReservedUpstreamKey(domain string) (key string, err error) {
+	if err = netutil.ValidateDomainName(domain); err != nil {
+		return "", err
+	}
+
+	return domain + ".", nil
 }
 
 // prepareGFWList initializes the GFW list manager and applies domain routing
@@ -513,6 +631,12 @@ func (m *gfwlistManager) applyToUpstreamConfig(
 func (s *Server) prepareGFWList(ctx context.Context) (err error) {
 	conf := s.conf.GFWList
 	if conf == nil || !conf.Enabled {
+		s.pendingGFWListDomains = nil
+		if s.gfwlist != nil {
+			s.gfwlist.stop()
+			s.gfwlist = nil
+		}
+
 		return nil
 	}
 
@@ -532,10 +656,30 @@ func (s *Server) prepareGFWList(ctx context.Context) (err error) {
 	}
 
 	gfwLogger := s.baseLogger.With(slogutil.KeyPrefix, "gfwlist")
-	s.gfwlist = newGFWListManager(gfwLogger, conf, dataDir)
+	var gfwMgr *gfwlistManager
+	gfwMgr = newGFWListManager(gfwLogger, conf, dataDir, func(ctx context.Context, domains map[string]struct{}) {
+		if !s.setPendingGFWListDomains(gfwMgr, domains) {
+			return
+		}
+
+		s.logger.InfoContext(ctx, "reconfiguring after gfwlist update")
+
+		if reconfigureErr := s.Reconfigure(ctx, nil); reconfigureErr != nil {
+			s.logger.ErrorContext(
+				ctx,
+				"reconfiguring after gfwlist update",
+				slogutil.KeyError,
+				reconfigureErr,
+			)
+		}
+	})
+	s.gfwlist = gfwMgr
+
+	domains := s.pendingGFWListDomains
+	s.pendingGFWListDomains = nil
 
 	// Load and start background updater.
-	s.gfwlist.start(ctx)
+	s.gfwlist.start(ctx, domains)
 
 	// Apply to upstream config.
 	if s.conf.UpstreamConfig != nil {
@@ -552,4 +696,22 @@ func (s *Server) prepareGFWList(ctx context.Context) (err error) {
 	}
 
 	return nil
+}
+
+// setPendingGFWListDomains stores domains for the next GFW list prepare.  It
+// takes ownership of domains.
+func (s *Server) setPendingGFWListDomains(
+	gfwMgr *gfwlistManager,
+	domains map[string]struct{},
+) (ok bool) {
+	s.serverLock.Lock()
+	defer s.serverLock.Unlock()
+
+	if s.gfwlist != gfwMgr {
+		return false
+	}
+
+	s.pendingGFWListDomains = domains
+
+	return true
 }

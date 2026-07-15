@@ -156,6 +156,10 @@ type Server struct {
 	// gfwlist manages GFW list based DNS split routing.
 	gfwlist *gfwlistManager
 
+	// pendingGFWListDomains is a one-shot in-memory GFW list snapshot to use
+	// during the next reconfigure after a list update.
+	pendingGFWListDomains map[string]struct{}
+
 	// dns64Pref is the NAT64 prefix used for DNS64 response mapping.  The major
 	// part of DNS64 happens inside the [proxy] package, but there still are
 	// some places where response mapping is needed (e.g. DHCP).
@@ -810,6 +814,11 @@ func (s *Server) stopLocked(ctx context.Context) {
 
 	for _, b := range s.bootResolvers {
 		logCloserErr(ctx, b, "closing bootstrap", s.logger.With("address", b.Address()))
+	}
+
+	if s.gfwlist != nil {
+		s.gfwlist.stop()
+		s.gfwlist = nil
 	}
 
 	s.isRunning = false

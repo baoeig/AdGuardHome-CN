@@ -2,8 +2,12 @@ package dnsforward
 
 import (
 	"encoding/base64"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/AdguardTeam/dnsproxy/proxy"
+	"github.com/AdguardTeam/dnsproxy/upstream"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -184,7 +188,7 @@ func TestGFWListManagerCheckDomain(t *testing.T) {
 	conf := &GFWListConfig{
 		CustomDomains: []string{"custom.example.net"},
 	}
-	m := newGFWListManager(testLogger, conf, t.TempDir())
+	m := newGFWListManager(testLogger, conf, t.TempDir(), nil)
 	m.domains["example.org"] = struct{}{}
 
 	matched, source := m.checkDomain("sub.example.org")
@@ -195,9 +199,66 @@ func TestGFWListManagerCheckDomain(t *testing.T) {
 	assert.True(t, matched)
 	assert.Equal(t, "custom", source)
 
+	matched, source = m.checkDomain("sub.custom.example.net")
+	assert.True(t, matched)
+	assert.Equal(t, "custom", source)
+
 	matched, source = m.checkDomain("other.example.net")
 	assert.False(t, matched)
 	assert.Empty(t, source)
+}
+
+func TestGFWListManagerDomainCountDeduplicatesCustomDomains(t *testing.T) {
+	conf := &GFWListConfig{
+		CustomDomains: []string{"example.org", "custom.example.net"},
+	}
+	m := newGFWListManager(testLogger, conf, t.TempDir(), nil)
+	m.domains["example.org"] = struct{}{}
+
+	assert.Equal(t, 2, m.domainCount())
+}
+
+func TestGFWListManagerStartUsesMemorySnapshot(t *testing.T) {
+	dir := t.TempDir()
+	err := os.WriteFile(
+		filepath.Join(dir, gfwlistCacheFile),
+		[]byte("not base64"),
+		0o600,
+	)
+	require.NoError(t, err)
+
+	m := newGFWListManager(testLogger, &GFWListConfig{}, dir, nil)
+	m.start(t.Context(), map[string]struct{}{
+		"example.org": {},
+	})
+	t.Cleanup(m.stop)
+
+	assert.Equal(t, 1, m.domainCount())
+}
+
+func TestGFWListManagerApplyToUpstreamConfig(t *testing.T) {
+	conf := &GFWListConfig{
+		UpstreamDNS:   []string{"8.8.8.8", "1.1.1.1"},
+		CustomDomains: []string{"example.org", "custom.example.net"},
+	}
+	m := newGFWListManager(testLogger, conf, t.TempDir(), nil)
+	m.domains["example.org"] = struct{}{}
+	m.domains["example.com"] = struct{}{}
+
+	uc := &proxy.UpstreamConfig{}
+	err := m.applyToUpstreamConfig(t.Context(), uc, &upstream.Options{
+		Logger: testLogger,
+	})
+	require.NoError(t, err)
+
+	for _, domain := range []string{
+		"example.com.",
+		"example.org.",
+		"custom.example.net.",
+	} {
+		assert.Len(t, uc.DomainReservedUpstreams[domain], 2)
+		assert.Len(t, uc.SpecifiedDomainUpstreams[domain], 2)
+	}
 }
 
 func TestParseGFWList(t *testing.T) {

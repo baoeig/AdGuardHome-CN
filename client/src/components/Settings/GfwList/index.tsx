@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import Card from '../../ui/Card';
@@ -31,6 +31,8 @@ const DEFAULT_STATUS: GfwListStatus = {
     update_interval: 86400,
 };
 
+const CUSTOM_DOMAIN_PAGE_SIZE = 50;
+
 /**
  * Normalizes a GFW custom rule to the domain it represents.  This intentionally
  * mirrors the backend: plain domains, wildcard domains, common adblock domain
@@ -39,6 +41,10 @@ const DEFAULT_STATUS: GfwListStatus = {
 const normalizeGfwDomainRule = (rule: string): string => {
     let value = rule.trim().toLowerCase();
     if (!value) {
+        return '';
+    }
+
+    if (value.startsWith('!') || value.startsWith('#') || value.startsWith('@@') || value.startsWith('[')) {
         return '';
     }
 
@@ -74,7 +80,7 @@ const normalizeGfwDomainRule = (rule: string): string => {
     return value;
 };
 
-const validateDomainRule = (rule: string, existingDomains: string[]): string => {
+const validateDomainRule = (rule: string, existingDomains?: ReadonlySet<string>): string => {
     const domain = normalizeGfwDomainRule(rule);
     if (!domain) {
         return 'gfwlist_domain_empty';
@@ -92,7 +98,7 @@ const validateDomainRule = (rule: string, existingDomains: string[]): string => 
         return 'gfwlist_domain_is_ip';
     }
 
-    if (existingDomains.includes(domain)) {
+    if (existingDomains?.has(domain)) {
         return 'gfwlist_domain_duplicate';
     }
 
@@ -118,6 +124,7 @@ const GfwList = () => {
     // custom domain management
     const [newDomain, setNewDomain] = useState('');
     const [domainError, setDomainError] = useState('');
+    const [customDomainPage, setCustomDomainPage] = useState(0);
     const [checkDomain, setCheckDomain] = useState('');
     const [checkResult, setCheckResult] = useState<GfwListCheckResult | null>(null);
     const [checkError, setCheckError] = useState('');
@@ -127,6 +134,16 @@ const GfwList = () => {
     // operations like "update list now" without waiting for a full status
     // fetch.
     const [liveDomainCount, setLiveDomainCount] = useState(0);
+
+    const customDomains = status.custom_domains || [];
+    const customDomainPageCount = Math.max(1, Math.ceil(customDomains.length / CUSTOM_DOMAIN_PAGE_SIZE));
+    const safeCustomDomainPage = Math.min(customDomainPage, customDomainPageCount - 1);
+    const customDomainStart = safeCustomDomainPage * CUSTOM_DOMAIN_PAGE_SIZE;
+    const customDomainEnd = Math.min(customDomainStart + CUSTOM_DOMAIN_PAGE_SIZE, customDomains.length);
+    const visibleCustomDomains = useMemo(
+        () => customDomains.slice(customDomainStart, customDomainEnd),
+        [customDomains, customDomainStart, customDomainEnd],
+    );
 
     const showSuccess = (msg: string) => {
         setSuccessMsg(msg);
@@ -160,6 +177,10 @@ const GfwList = () => {
     useEffect(() => {
         fetchStatus();
     }, []);
+
+    useEffect(() => {
+        setCustomDomainPage((page) => Math.min(page, customDomainPageCount - 1));
+    }, [customDomainPageCount]);
 
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -224,15 +245,18 @@ const GfwList = () => {
         // Validate each domain.
         const validDomains: string[] = [];
         const errors: string[] = [];
-        const currentDomains = (status.custom_domains || []).map((d) => normalizeGfwDomainRule(d)).filter(Boolean);
+        const currentDomains = new Set(
+            (status.custom_domains || []).map((d) => normalizeGfwDomainRule(d)).filter(Boolean),
+        );
 
         candidates.forEach((rule) => {
             const domain = normalizeGfwDomainRule(rule);
-            const err = validateDomainRule(rule, [...currentDomains, ...validDomains]);
+            const err = validateDomainRule(rule, currentDomains);
             if (err) {
                 errors.push(`${rule}: ${t(err)}`);
             } else {
                 validDomains.push(domain);
+                currentDomains.add(domain);
             }
         });
 
@@ -247,7 +271,9 @@ const GfwList = () => {
         try {
             await apiClient.addGfwListDomains(validDomains);
             setNewDomain('');
-            await fetchStatus();
+            const updatedStatus = await fetchStatus();
+            const customDomainCount = updatedStatus?.custom_domains?.length ?? 0;
+            setCustomDomainPage(Math.max(0, Math.ceil(customDomainCount / CUSTOM_DOMAIN_PAGE_SIZE) - 1));
 
             if (errors.length > 0) {
                 showSuccess(
@@ -282,7 +308,7 @@ const GfwList = () => {
         e.preventDefault();
 
         const domain = normalizeGfwDomainRule(checkDomain);
-        const err = validateDomainRule(checkDomain, []);
+        const err = validateDomainRule(checkDomain);
         if (err) {
             setCheckResult(null);
             setCheckError(t(err));
@@ -435,12 +461,6 @@ const GfwList = () => {
                             setNewDomain(e.target.value);
                             setDomainError('');
                         }}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                                e.preventDefault();
-                                handleAddDomain();
-                            }
-                        }}
                         placeholder="example.com"
                     />
                     {domainError && <div className="invalid-feedback d-block">{domainError}</div>}
@@ -472,31 +492,81 @@ const GfwList = () => {
                     </ol>
                 </div>
 
-                {status.custom_domains && status.custom_domains.length > 0 ? (
-                    <table className="table table-striped table-hover">
-                        <thead>
-                            <tr>
-                                <th>{t('domain')}</th>
-                                <th className="text-right">{t('actions_table_header')}</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {status.custom_domains.map((d) => (
-                                <tr key={d}>
-                                    <td>{d}</td>
-                                    <td className="text-right">
+                {customDomains.length > 0 ? (
+                    <>
+                        <table className="table table-striped table-hover">
+                            <thead>
+                                <tr>
+                                    <th>{t('domain')}</th>
+                                    <th className="text-right">{t('actions_table_header')}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {visibleCustomDomains.map((d) => (
+                                    <tr key={d}>
+                                        <td>{d}</td>
+                                        <td className="text-right">
+                                            <button
+                                                type="button"
+                                                className="btn btn-sm btn-outline-danger"
+                                                onClick={() => handleRemoveDomain(d)}
+                                            >
+                                                {t('delete_table_action')}
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+
+                        <div className="d-flex justify-content-between align-items-center flex-wrap mt-2">
+                            <div className="text-muted mb-2 mb-sm-0">
+                                {t('gfwlist_custom_domains_page_info', {
+                                    from: customDomainStart + 1,
+                                    to: customDomainEnd,
+                                    total: customDomains.length,
+                                })}
+                            </div>
+
+                            {customDomainPageCount > 1 && (
+                                <ul className="pagination pagination-sm mb-0">
+                                    <li className={`page-item ${safeCustomDomainPage === 0 ? 'disabled' : ''}`}>
                                         <button
                                             type="button"
-                                            className="btn btn-sm btn-outline-danger"
-                                            onClick={() => handleRemoveDomain(d)}
+                                            className="page-link"
+                                            disabled={safeCustomDomainPage === 0}
+                                            onClick={() => setCustomDomainPage((page) => Math.max(0, page - 1))}
                                         >
-                                            {t('delete_table_action')}
+                                            {t('previous_btn')}
                                         </button>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                                    </li>
+                                    <li className="page-item active">
+                                        <span className="page-link">
+                                            {safeCustomDomainPage + 1} / {customDomainPageCount}
+                                        </span>
+                                    </li>
+                                    <li
+                                        className={`page-item ${
+                                            safeCustomDomainPage >= customDomainPageCount - 1 ? 'disabled' : ''
+                                        }`}
+                                    >
+                                        <button
+                                            type="button"
+                                            className="page-link"
+                                            disabled={safeCustomDomainPage >= customDomainPageCount - 1}
+                                            onClick={() =>
+                                                setCustomDomainPage((page) =>
+                                                    Math.min(customDomainPageCount - 1, page + 1),
+                                                )
+                                            }
+                                        >
+                                            {t('next_btn')}
+                                        </button>
+                                    </li>
+                                </ul>
+                            )}
+                        </div>
+                    </>
                 ) : (
                     <div className="text-muted">{t('gfwlist_no_custom_domains')}</div>
                 )}

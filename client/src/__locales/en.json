@@ -781,6 +781,7 @@
   "gfwlist_custom_domains": "Custom Domains",
   "gfwlist_custom_domains_desc": "Add extra domains that should also use the GFW list upstream DNS servers, regardless of the GFW list.",
   "gfwlist_custom_domains_hint": "Enter one rule per line. Supported formats include plain domains, wildcards, adblock-style domain rules, URL rules, and hosts-file lines.",
+  "gfwlist_custom_domains_page_info": "Showing {{from}}-{{to}} of {{total}} custom domains",
   "gfwlist_no_custom_domains": "No custom domains added yet.",
   "gfwlist_add_domain": "Add",
   "gfwlist_domain_added": "Domain added successfully",
