@@ -51,7 +51,7 @@ type jsonGFWListConfigReq struct {
 	UpstreamDNS *[]string `json:"upstream_dns"`
 
 	// UpdateInterval is the update interval in seconds.
-	UpdateInterval *int `json:"update_interval"`
+	UpdateInterval *int64 `json:"update_interval"`
 }
 
 // jsonGFWListDomainReq is the JSON request for adding/removing custom domains.
@@ -143,43 +143,107 @@ func (s *Server) handleGFWListSetConfig(w http.ResponseWriter, r *http.Request) 
 
 		return
 	}
-
+	// Read-modify-validate-write is intentionally done under a single
+	// serverLock critical section.  Do NOT split this into "read config,
+	// unlock, validate, lock, write": validate() runs in well under a
+	// millisecond (the heaviest check, proxy.ParseUpstreamsConfig, is
+	// ~100µs), and this handler is a low-frequency management endpoint, not
+	// a hot path.  Releasing the lock around validate() would open a window
+	// where a concurrent config change (e.g. another admin adding a custom
+	// domain) could be silently overwritten by this request's candidate,
+	// which is a worse outcome than a sub-millisecond lock hold.
 	s.serverLock.Lock()
 
-	if s.conf.GFWList == nil {
-		s.conf.GFWList = &GFWListConfig{}
+	existing := s.conf.GFWList
+	if existing == nil {
+		existing = &GFWListConfig{}
 	}
 
-	conf := s.conf.GFWList
+	// Validate a candidate configuration before committing it, so that an
+	// invalid request (e.g. a bad URL scheme or out-of-range update
+	// interval) neither mutates the stored configuration nor triggers a
+	// reconfigure.
+	candidate, err := applyGFWListConfigReq(existing, req)
+	if err != nil {
+		s.serverLock.Unlock()
+		aghhttp.WriteJSONResponseError(ctx, s.logger, w, r, err)
 
-	if req.Enabled != nil {
-		conf.Enabled = *req.Enabled
+		return
+	}
+	if validateErr := candidate.validate(); validateErr != nil {
+		s.serverLock.Unlock()
+		aghhttp.WriteJSONResponseError(ctx, s.logger, w, r, validateErr)
+
+		return
 	}
 
-	if req.URL != nil {
-		conf.URL = *req.URL
-	}
-
-	if req.UpstreamDNS != nil {
-		conf.UpstreamDNS = *req.UpstreamDNS
-	}
-
-	if req.UpdateInterval != nil {
-		conf.UpdateInterval = timeutil.Duration(time.Duration(*req.UpdateInterval) * time.Second)
-	}
+	s.conf.GFWList = candidate
 
 	s.serverLock.Unlock()
 
 	s.conf.ConfModifier.Apply(ctx)
 
 	// Trigger a reconfigure to apply changes.
-	if err := s.Reconfigure(ctx, nil); err != nil {
-		aghhttp.WriteJSONResponseError(ctx, s.logger, w, r, err)
+	if reconfigureErr := s.Reconfigure(ctx, nil); reconfigureErr != nil {
+		aghhttp.WriteJSONResponseError(ctx, s.logger, w, r, reconfigureErr)
 
 		return
 	}
 
 	aghhttp.WriteJSONResponseOK(ctx, s.logger, w, r, &struct{}{})
+}
+
+// applyGFWListConfigReq returns a new GFWListConfig with req's fields applied
+// on top of existing.  existing is not mutated.
+func applyGFWListConfigReq(
+	existing *GFWListConfig,
+	req *jsonGFWListConfigReq,
+) (candidate *GFWListConfig, err error) {
+	candidate = cloneGFWListConfig(existing)
+
+	if req.Enabled != nil {
+		candidate.Enabled = *req.Enabled
+	}
+
+	if req.URL != nil {
+		candidate.URL = *req.URL
+	}
+
+	if req.UpstreamDNS != nil {
+		candidate.UpstreamDNS = *req.UpstreamDNS
+	}
+
+	if req.UpdateInterval != nil {
+		if err = validateGFWListUpdateIntervalSeconds(*req.UpdateInterval); err != nil {
+			return nil, err
+		}
+
+		candidate.UpdateInterval = timeutil.Duration(time.Duration(*req.UpdateInterval) * time.Second)
+	}
+
+	return candidate, nil
+}
+
+// validateGFWListUpdateIntervalSeconds validates a raw JSON update interval
+// value before it is converted to [time.Duration].  This prevents integer
+// overflow during the seconds-to-duration conversion.
+func validateGFWListUpdateIntervalSeconds(seconds int64) (err error) {
+	if seconds == 0 {
+		return nil
+	}
+
+	minSeconds := int64(minGFWListUpdateInterval / time.Second)
+	maxSeconds := int64(maxGFWListUpdateInterval / time.Second)
+	if seconds < minSeconds || seconds > maxSeconds {
+		return fmt.Errorf(
+			"gfwlist: update_interval must be 0 or between %d and %d seconds, got %d",
+			minSeconds,
+			maxSeconds,
+			seconds,
+		)
+	}
+
+	return nil
 }
 
 // handleGFWListUpdate handles POST /control/gfwlist/update requests.
