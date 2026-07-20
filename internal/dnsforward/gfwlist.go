@@ -164,6 +164,11 @@ type gfwlistManager struct {
 	// mu protects domains.
 	mu sync.RWMutex
 
+	// updateMu serializes calls to update.  It prevents the background
+	// updater and the manual HTTP trigger from downloading at the same
+	// time.
+	updateMu sync.Mutex
+
 	// domains is the set of domains parsed from the GFW list.
 	domains map[string]struct{}
 
@@ -471,6 +476,11 @@ func (m *gfwlistManager) backgroundUpdater(
 // handleBackgroundUpdate runs a single update tick.
 func (m *gfwlistManager) handleBackgroundUpdate(ctx context.Context) {
 	domains, err := m.update(ctx)
+	if errors.Is(err, errGFWListUpdateInProgress) {
+		m.logger.DebugContext(ctx, "skipping gfwlist tick; update already in progress")
+
+		return
+	}
 	if err != nil {
 		m.logger.WarnContext(ctx, "updating gfwlist", slogutil.KeyError, err)
 
@@ -573,8 +583,20 @@ func (m *gfwlistManager) downloadOnce(ctx context.Context) (body []byte, err err
 	return body, nil
 }
 
-// update downloads and parses the GFW list from the configured URL.
+// errGFWListUpdateInProgress is returned by update when another update is
+// already running on this manager.  It is a sentinel; callers may compare
+// with errors.Is to skip noisy logging on the background tick.
+var errGFWListUpdateInProgress = errors.Error("gfwlist: update already in progress")
+
+// update downloads and parses the GFW list from the configured URL.  At most
+// one update runs at a time; concurrent callers receive
+// errGFWListUpdateInProgress.
 func (m *gfwlistManager) update(ctx context.Context) (domains map[string]struct{}, err error) {
+	if !m.updateMu.TryLock() {
+		return nil, errGFWListUpdateInProgress
+	}
+	defer m.updateMu.Unlock()
+
 	if m.conf.URL == "" {
 		return m.domainSnapshot(), nil
 	}
@@ -1034,24 +1056,12 @@ func (s *Server) prepareGFWList(ctx context.Context) (err error) {
 	dataDir := s.gfwListDataDir()
 
 	gfwLogger := s.baseLogger.With(slogutil.KeyPrefix, "gfwlist")
-	var gfwMgr *gfwlistManager
-	updateCallback := func(ctx context.Context, domains map[string]struct{}) {
-		if !s.setPendingGFWListDomains(gfwMgr, domains) {
-			return
-		}
-
-		s.logger.InfoContext(ctx, "reconfiguring after gfwlist update")
-
-		if reconfigureErr := s.Reconfigure(ctx, nil); reconfigureErr != nil {
-			s.logger.ErrorContext(
-				ctx,
-				"reconfiguring after gfwlist update",
-				slogutil.KeyError,
-				reconfigureErr,
-			)
-		}
-	}
-	gfwMgr = newGFWListManager(gfwLogger, conf, dataDir, updateCallback)
+	gfwMgr := newGFWListManager(gfwLogger, conf, dataDir, nil)
+	// Wire the callback after construction since it closes over gfwMgr.  The
+	// callback checks s.gfwlist against this exact instance, so a stale
+	// manager's late-arriving update is dropped instead of triggering a
+	// reconfigure.
+	gfwMgr.onUpdate = makeGFWListUpdateCallback(s, gfwMgr, s.Reconfigure)
 	s.gfwlist = gfwMgr
 
 	domains := s.pendingGFWListDomains
@@ -1076,6 +1086,34 @@ func (s *Server) stopGFWList() {
 
 	s.gfwlist.stop()
 	s.gfwlist = nil
+}
+
+// makeGFWListUpdateCallback returns the callback invoked when the background
+// updater successfully downloads a new GFW list.  It is a package-level
+// function (rather than a closure inside prepareGFWList) so the
+// pending-domains → reconfigure flow can be unit-tested with a stubbed
+// reconfigure.  reconfigure is typically s.Reconfigure.
+func makeGFWListUpdateCallback(
+	s *Server,
+	gfwMgr *gfwlistManager,
+	reconfigure func(ctx context.Context, conf *ServerConfig) error,
+) func(ctx context.Context, domains map[string]struct{}) {
+	return func(ctx context.Context, domains map[string]struct{}) {
+		if !s.setPendingGFWListDomains(gfwMgr, domains) {
+			return
+		}
+
+		s.logger.InfoContext(ctx, "reconfiguring after gfwlist update")
+
+		if reconfigureErr := reconfigure(ctx, nil); reconfigureErr != nil {
+			s.logger.ErrorContext(
+				ctx,
+				"reconfiguring after gfwlist update",
+				slogutil.KeyError,
+				reconfigureErr,
+			)
+		}
+	}
 }
 
 // gfwListDataDir returns the cache directory for the GFW list.
