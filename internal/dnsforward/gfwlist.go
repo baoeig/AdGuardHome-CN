@@ -624,9 +624,14 @@ func (m *gfwlistManager) update(ctx context.Context) (domains map[string]struct{
 
 	m.setDomains(domains)
 
-	// Save to cache.
+	// Save to cache.  A stopped manager skipping the write is expected
+	// during Reconfigure, so it is logged at Debug rather than Warn.
 	if cacheErr := m.saveToCache(ctx, body); cacheErr != nil {
-		m.logger.WarnContext(ctx, "saving gfwlist cache", slogutil.KeyError, cacheErr)
+		if errors.Is(cacheErr, errGFWListManagerStopped) {
+			m.logger.DebugContext(ctx, "skipping gfwlist cache save; manager stopped")
+		} else {
+			m.logger.WarnContext(ctx, "saving gfwlist cache", slogutil.KeyError, cacheErr)
+		}
 	}
 
 	return domains, nil
@@ -895,10 +900,24 @@ func (m *gfwlistManager) loadFromCache(ctx context.Context) (err error) {
 	return nil
 }
 
-// saveToCache saves the raw GFW list data to the local cache file.
+// errGFWListManagerStopped is returned by saveToCache when the manager has
+// been stopped.  After a Reconfigure the cache file belongs to the new
+// manager, so a stale manager finishing its in-flight download must not
+// overwrite fresh data with domains from an old URL.
+var errGFWListManagerStopped = errors.Error("gfwlist: manager stopped")
+
+// saveToCache saves the raw GFW list data to the local cache file.  It
+// refuses to write if the manager has been stopped; see
+// errGFWListManagerStopped.
 func (m *gfwlistManager) saveToCache(ctx context.Context, data []byte) (err error) {
 	if err = ctx.Err(); err != nil {
 		return err
+	}
+
+	select {
+	case <-m.stopCh:
+		return errGFWListManagerStopped
+	default:
 	}
 
 	err = os.MkdirAll(m.dataDir, 0o700)
