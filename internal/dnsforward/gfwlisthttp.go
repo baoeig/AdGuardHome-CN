@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/AdguardTeam/AdGuardHome/internal/aghhttp"
+	"github.com/AdguardTeam/golibs/errors"
 	"github.com/AdguardTeam/golibs/timeutil"
 )
 
@@ -261,6 +262,16 @@ func (s *Server) handleGFWListUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	domains, err := gfwMgr.update(ctx)
+	if errors.Is(err, errGFWListUpdateInProgress) {
+		// Another update (typically the background tick) is already
+		// downloading.  Return 409 so the UI can show an informational
+		// notice instead of a misleading failure.
+		aghhttp.WriteJSONResponse(ctx, s.logger, w, r, http.StatusConflict, &aghhttp.HTTPAPIErrorResp{
+			Msg: err.Error(),
+		})
+
+		return
+	}
 	if err != nil {
 		aghhttp.WriteJSONResponseError(ctx, s.logger, w, r, err)
 

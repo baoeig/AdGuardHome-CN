@@ -778,6 +778,7 @@
   "gfwlist_load_error": "Failed to load GFW list status: {{error}}",
   "gfwlist_save_error": "Failed to save: {{error}}",
   "gfwlist_update_error": "Failed to update GFW list: {{error}}",
+  "gfwlist_update_in_progress": "A GFW list update is already in progress — please try again shortly.",
   "gfwlist_custom_domains": "Custom Domains",
   "gfwlist_custom_domains_desc": "Add extra domains that should also use the GFW list upstream DNS servers, regardless of the GFW list.",
   "gfwlist_custom_domains_hint": "Enter one rule per line. Supported formats include plain domains, wildcards, adblock-style domain rules, URL rules, and hosts-file lines.",

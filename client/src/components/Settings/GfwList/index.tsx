@@ -6,7 +6,7 @@ import PageTitle from '../../ui/PageTitle';
 import Loading from '../../ui/Loading';
 import { Checkbox } from '../../ui/Controls/Checkbox';
 import apiClient from '../../../api/Api';
-import { normalizeGfwDomainRule } from '../../../helpers/gfwlist';
+import { isUpdateInProgressError, normalizeGfwDomainRule } from '../../../helpers/gfwlist';
 
 interface GfwListStatus {
     enabled: boolean;
@@ -72,6 +72,7 @@ const GfwList = () => {
     const [status, setStatus] = useState<GfwListStatus>(DEFAULT_STATUS);
     const [successMsg, setSuccessMsg] = useState('');
     const [errorMsg, setErrorMsg] = useState('');
+    const [infoMsg, setInfoMsg] = useState('');
 
     // form state
     const [enabled, setEnabled] = useState(false);
@@ -102,12 +103,21 @@ const GfwList = () => {
     const showSuccess = (msg: string) => {
         setSuccessMsg(msg);
         setErrorMsg('');
+        setInfoMsg('');
         setTimeout(() => setSuccessMsg(''), 3000);
     };
 
     const showError = (msg: string) => {
         setErrorMsg(msg);
         setSuccessMsg('');
+        setInfoMsg('');
+    };
+
+    const showInfo = (msg: string) => {
+        setInfoMsg(msg);
+        setSuccessMsg('');
+        setErrorMsg('');
+        setTimeout(() => setInfoMsg(''), 5000);
     };
 
     const fetchStatus = async (page = customDomainPage, showLoadError = true) => {
@@ -178,7 +188,11 @@ const GfwList = () => {
 
             showSuccess(t('gfwlist_updated', { count: newCount }));
         } catch (e: any) {
-            showError(t('gfwlist_update_error', { error: e.message }));
+            if (isUpdateInProgressError(e)) {
+                showInfo(t('gfwlist_update_in_progress'));
+            } else {
+                showError(t('gfwlist_update_error', { error: e.message }));
+            }
         } finally {
             setUpdating(false);
         }
@@ -298,6 +312,11 @@ const GfwList = () => {
             {successMsg && (
                 <div className="alert alert-success" role="alert">
                     {successMsg}
+                </div>
+            )}
+            {infoMsg && (
+                <div className="alert alert-info" role="alert">
+                    {infoMsg}
                 </div>
             )}
             {errorMsg && (

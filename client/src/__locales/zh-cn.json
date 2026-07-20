@@ -778,6 +778,7 @@
   "gfwlist_load_error": "加载 GFW 列表状态失败：{{error}}",
   "gfwlist_save_error": "保存失败：{{error}}",
   "gfwlist_update_error": "更新 GFW 列表失败：{{error}}",
+  "gfwlist_update_in_progress": "GFW 列表正在更新中，请稍后再试。",
   "gfwlist_custom_domains": "自定义域名",
   "gfwlist_custom_domains_desc": "添加额外的域名，使其也通过 GFW 列表的上游 DNS 服务器进行解析（不依赖 GFW 列表本身）。",
   "gfwlist_custom_domains_hint": "每行输入一条规则。支持普通域名、通配符、Adblock 域名规则、URL 规则和 Hosts 文件行。",

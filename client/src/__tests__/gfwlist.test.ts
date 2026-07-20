@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { normalizeGfwDomainRule } from '../helpers/gfwlist';
+import { isUpdateInProgressError, normalizeGfwDomainRule } from '../helpers/gfwlist';
 
 /**
  * Test cases mirror internal/dnsforward/gfwlist_internal_test.go
@@ -95,5 +95,35 @@ describe('normalizeGfwDomainRule', () => {
         test('extra fields: last field wins', () => {
             expect(normalizeGfwDomainRule('0.0.0.0 tracker.example.com extra')).toBe('extra');
         });
+    });
+});
+
+describe('isUpdateInProgressError', () => {
+    // The API client (Api.makeRequest) flattens server errors into
+    // "<url> | <body> | <status>" strings, so detection relies on the
+    // trailing status code.
+    test('detects 409 conflict suffix', () => {
+        const err = new Error('http://localhost/control/gfwlist/update | [object Object] | 409');
+        expect(isUpdateInProgressError(err)).toBe(true);
+    });
+
+    test('tolerates trailing whitespace', () => {
+        const err = new Error('http://localhost/control/gfwlist/update | [object Object] | 409\n');
+        expect(isUpdateInProgressError(err)).toBe(true);
+    });
+
+    test('rejects other status codes', () => {
+        expect(isUpdateInProgressError(new Error('http://x | body | 422'))).toBe(false);
+        expect(isUpdateInProgressError(new Error('http://x | body | 500'))).toBe(false);
+    });
+
+    test('does not false-positive on 409 inside the URL', () => {
+        expect(isUpdateInProgressError(new Error('http://x:4090/control | body | 422'))).toBe(false);
+    });
+
+    test('handles missing or non-string message', () => {
+        expect(isUpdateInProgressError(new Error())).toBe(false);
+        expect(isUpdateInProgressError({} as Error)).toBe(false);
+        expect(isUpdateInProgressError(null as unknown as Error)).toBe(false);
     });
 });

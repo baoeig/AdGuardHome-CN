@@ -44,3 +44,13 @@ export const normalizeGfwDomainRule = (rule: string): string => {
 
     return value;
 };
+
+/**
+ * Returns true when the error came from the backend rejecting a manual
+ * update because another update is already in flight.  The API client
+ * flattens errors into "<url> | <body> | <status>" strings, so the status
+ * code suffix is the reliable signal.
+ */
+export const isUpdateInProgressError = (e: Error): boolean => {
+    return typeof e?.message === 'string' && e.message.trimEnd().endsWith('| 409');
+};
