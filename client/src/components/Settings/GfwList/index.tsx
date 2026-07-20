@@ -6,6 +6,7 @@ import PageTitle from '../../ui/PageTitle';
 import Loading from '../../ui/Loading';
 import { Checkbox } from '../../ui/Controls/Checkbox';
 import apiClient from '../../../api/Api';
+import { normalizeGfwDomainRule } from '../../../helpers/gfwlist';
 
 interface GfwListStatus {
     enabled: boolean;
@@ -36,53 +37,6 @@ const DEFAULT_STATUS: GfwListStatus = {
 };
 
 const CUSTOM_DOMAIN_PAGE_SIZE = 50;
-
-/**
- * Normalizes a GFW custom rule to the domain it represents.  This intentionally
- * mirrors the backend: plain domains, wildcard domains, common adblock domain
- * rules, URL rules, and hosts-file lines are accepted.
- */
-const normalizeGfwDomainRule = (rule: string): string => {
-    let value = rule.trim().toLowerCase();
-    if (!value) {
-        return '';
-    }
-
-    if (value.startsWith('!') || value.startsWith('#') || value.startsWith('@@') || value.startsWith('[')) {
-        return '';
-    }
-
-    const fields = value.split(/\s+/);
-    if (fields.length > 1) {
-        value = fields[fields.length - 1];
-    }
-
-    if (value.startsWith('!') || value.startsWith('#') || value.startsWith('@@') || value.startsWith('[')) {
-        return '';
-    }
-
-    if (value.startsWith('||')) {
-        value = value.slice(2);
-        const index = value.search(/[/^*]/);
-        if (index >= 0) {
-            value = value.slice(0, index);
-        }
-    } else if (value.startsWith('*.')) {
-        value = value.slice(2);
-    } else if (value.startsWith('.')) {
-        value = value.slice(1);
-    } else if (value.startsWith('|http://') || value.startsWith('|https://')) {
-        value = value.replace(/^\|https?:\/\//, '');
-        const index = value.search(/[/?:]/);
-        if (index >= 0) {
-            value = value.slice(0, index);
-        }
-    }
-
-    value = value.replace(/\.$/, '');
-
-    return value;
-};
 
 const validateDomainRule = (rule: string, existingDomains?: ReadonlySet<string>): string => {
     const domain = normalizeGfwDomainRule(rule);
