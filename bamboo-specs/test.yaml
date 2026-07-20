@@ -9,6 +9,7 @@
     # flaky test suite.
     'cacheBuster': '0'
     'channel': 'development'
+    'clientDir': 'client_v2'
     'dockerFrontend': 'adguard/home-js-builder:4.0'
     'dockerGo': 'adguard/go-builder:1.26.5--1'
 
@@ -58,9 +59,9 @@
                 docker info
 
                 docker build \
-                    --build-arg "BASE_IMAGE=${bamboo.dockerFrontend}" \
+                    --build-arg "BASE_IMAGE=${bamboo_dockerFrontend}" \
                     --build-arg "CACHE_BUSTER=${bamboo_cacheBuster}" \
-                    --output '.' \
+                    --build-arg "CLIENT_DIR=${bamboo_clientDir}" \
                     --progress 'plain' \
                     --target 'tester' \
                     -f ./docker/frontend.Dockerfile \
@@ -127,8 +128,9 @@
                 docker info
 
                 docker build \
-                    --build-arg "BASE_IMAGE=${bamboo.dockerFrontend}" \
+                    --build-arg "BASE_IMAGE=${bamboo_dockerFrontend}" \
                     --build-arg "CACHE_BUSTER=${bamboo_cacheBuster}" \
+                    --build-arg "CLIENT_DIR=${bamboo_clientDir}" \
                     --output '.' \
                     --progress 'plain' \
                     --target 'builder-exporter' \
@@ -168,6 +170,12 @@
                 #!/bin/sh
 
                 set -e -f -u -x
+
+                # The version.sh script queries the current state of the git
+                # repository, so we must explicitly checkout the revision that
+                # triggered the build to prevent race conditions when the master
+                # branch changes while this build is running.
+                git checkout "${bamboo_repository_revision_number}"
 
                 version="$(env CHANNEL=${bamboo_channel} sh ./scripts/make/version.sh)"
                 readonly version
@@ -216,9 +224,9 @@
                 docker info
 
                 docker build \
-                    --build-arg "BASE_IMAGE=${bamboo.dockerFrontend}" \
+                    --build-arg "BASE_IMAGE=${bamboo_dockerFrontend}" \
                     --build-arg "CACHE_BUSTER=${bamboo_cacheBuster}" \
-                    --output '.' \
+                    --build-arg "CLIENT_DIR=${bamboo_clientDir}" \
                     --progress 'plain' \
                     --target 'e2etester' \
                     -f ./docker/frontend.Dockerfile \
@@ -254,6 +262,7 @@
         # Set the default release channel on the release branch to beta, as we
         # may need to build a few of these.
         'variables':
+            'channel': 'candidate'
+            'clientDir': 'client'
             'dockerFrontend': 'adguard/home-js-builder:4.0'
             'dockerGo': 'adguard/go-builder:1.26.5--1'
-            'channel': 'candidate'
