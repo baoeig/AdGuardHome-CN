@@ -93,6 +93,9 @@ type webAPIConfig struct {
 	// confPath is the configuration file path.
 	confPath string
 
+	// pidFilePath is a path to a PID file.
+	pidFilePath string
+
 	// ReadTimeout is an option to pass to http.Server for setting an
 	// appropriate field.
 	ReadTimeout time.Duration
@@ -238,6 +241,9 @@ type webAPI struct {
 	// TODO(d.kolyshev):  Make it a pointer.
 	httpsServer httpsServer
 
+	// pidFilePath is used for cleanup.
+	pidFilePath string
+
 	// startTime is the start time of the web API server in Unix milliseconds.
 	startTime time.Time
 }
@@ -258,6 +264,7 @@ func newWebAPI(ctx context.Context, conf *webAPIConfig) (w *webAPI) {
 		baseLogger:   conf.baseLogger,
 		tlsManager:   conf.tlsManager,
 		auth:         conf.auth,
+		pidFilePath:  conf.pidFilePath,
 		startTime:    time.Now(),
 	}
 
@@ -386,7 +393,8 @@ func (web *webAPI) start(ctx context.Context) {
 
 		err := <-errs
 		if !errors.Is(err, http.ErrServerClosed) {
-			cleanupAlways()
+			cleanupAlways(ctx, logger, web.pidFilePath)
+
 			panic(err)
 		}
 
@@ -490,7 +498,8 @@ func (web *webAPI) serveTLS(ctx context.Context) (next bool) {
 	logger.InfoContext(ctx, "starting https server")
 	err := web.httpsServer.server.ListenAndServeTLS("", "")
 	if !errors.Is(err, http.ErrServerClosed) {
-		cleanupAlways()
+		cleanupAlways(ctx, logger, web.pidFilePath)
+
 		panic(fmt.Errorf("https: %w", err))
 	}
 
@@ -520,7 +529,8 @@ func (web *webAPI) mustStartHTTP3(ctx context.Context, address string) {
 	web.logger.DebugContext(ctx, "starting http/3 server")
 	err := web.httpsServer.server3.ListenAndServe()
 	if !errors.Is(err, http.ErrServerClosed) {
-		cleanupAlways()
+		cleanupAlways(ctx, logger, web.pidFilePath)
+
 		panic(fmt.Errorf("http3: %w", err))
 	}
 }
