@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -24,6 +25,52 @@ func TestGFWListManagerSaveToCache_StoppedManager(t *testing.T) {
 	m := newGFWListManager(testLogger, &GFWListConfig{}, dir, nil)
 	m.stop()
 
+	err := m.saveToCache(t.Context(), []byte("stale data"))
+	require.ErrorIs(t, err, errGFWListManagerStopped)
+
+	_, statErr := os.Stat(filepath.Join(dir, gfwlistCacheFile))
+	require.ErrorIs(t, statErr, os.ErrNotExist, "stopped manager must not create the cache file")
+}
+
+// TestGFWListManagerStop_WaitsForInFlightSave exercises the narrow window
+// between the stopped check in saveToCache and the final rename: a stop
+// landing inside that window must wait for the in-flight save to finish,
+// so that no stale rename can happen after stop has returned.  The test
+// holds stopMu to deterministically simulate a save that has passed the
+// check but has not renamed yet.
+func TestGFWListManagerStop_WaitsForInFlightSave(t *testing.T) {
+	dir := t.TempDir()
+
+	m := newGFWListManager(testLogger, &GFWListConfig{}, dir, nil)
+
+	// Simulate an in-flight save that has passed the stopped check and is
+	// about to write and rename the cache file.
+	m.stopMu.Lock()
+
+	stopped := make(chan struct{})
+	go func() {
+		m.stop()
+		close(stopped)
+	}()
+
+	// stop must not return while the in-flight save holds the lock.
+	select {
+	case <-stopped:
+		t.Fatal("stop returned while a cache save was still in flight")
+	case <-time.After(testTimeout / 10):
+	}
+
+	// Let the in-flight save finish; stop must now complete.
+	m.stopMu.Unlock()
+
+	select {
+	case <-stopped:
+	case <-time.After(testTimeout):
+		t.Fatal("stop did not return after the in-flight save completed")
+	}
+
+	// A save attempted after stop must be rejected, and the stale rename
+	// must never happen.
 	err := m.saveToCache(t.Context(), []byte("stale data"))
 	require.ErrorIs(t, err, errGFWListManagerStopped)
 

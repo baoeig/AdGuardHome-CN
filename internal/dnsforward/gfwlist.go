@@ -190,6 +190,11 @@ type gfwlistManager struct {
 	// stopOnce ensures stopCh is closed only once.
 	stopOnce sync.Once
 
+	// stopMu serializes stop against saveToCache: saveToCache holds it for
+	// the whole check-write-rename sequence, so once stop returns, no
+	// in-flight save can still rename the cache file.
+	stopMu sync.Mutex
+
 	// onUpdate is called after a successful background update.
 	onUpdate func(ctx context.Context, domains map[string]struct{})
 }
@@ -421,9 +426,14 @@ func gfwListStartupDelay(hasMemorySnapshot bool, interval time.Duration) (d time
 	return time.Duration(delay.Int64())
 }
 
-// stop stops the background updater.
+// stop stops the background updater.  It blocks until any in-flight
+// saveToCache has finished, so after stop returns no stale rename of the
+// shared cache file can occur; see stopMu.
 func (m *gfwlistManager) stop() {
 	m.stopOnce.Do(func() {
+		m.stopMu.Lock()
+		defer m.stopMu.Unlock()
+
 		close(m.stopCh)
 	})
 }
@@ -909,7 +919,15 @@ var errGFWListManagerStopped = errors.Error("gfwlist: manager stopped")
 // saveToCache saves the raw GFW list data to the local cache file.  It
 // refuses to write if the manager has been stopped; see
 // errGFWListManagerStopped.
+//
+// The lock is held for the entire check-write-rename sequence, so a
+// concurrent stop cannot land between the stopped check and the final
+// rename.  The unlock must be deferred first: deferred calls run LIFO, so
+// the rename in WithDeferredCleanup still happens while the lock is held.
 func (m *gfwlistManager) saveToCache(ctx context.Context, data []byte) (err error) {
+	m.stopMu.Lock()
+	defer m.stopMu.Unlock()
+
 	if err = ctx.Err(); err != nil {
 		return err
 	}
