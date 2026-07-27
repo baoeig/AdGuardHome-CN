@@ -61,6 +61,7 @@ const config = {
     output: {
         path: PUBLIC_PATH,
         filename: '[name].[chunkhash].js',
+        chunkFilename: 'assets/[name].[chunkhash].js',
         publicPath: isPreview ? '/client_v2/' : '/',
     },
     resolve: {
@@ -78,7 +79,7 @@ const config = {
                 use: 'yaml-loader',
             },
             {
-                test: /\.(svg|png|jpe?g|gif|webp|ico)$/i,
+                test: /\.(svg|png|jpe?g|gif|webp|ico|woff2?)$/i,
                 type: 'asset/resource',
                 generator: {
                     filename: 'assets/[name].[contenthash][ext]',
@@ -171,7 +172,7 @@ const config = {
         }),
         new MiniCssExtractPlugin({
             filename: isDev ? '[name].css' : '[name].[hash].css',
-            chunkFilename: isDev ? '[id].css' : '[id].[hash].css',
+            chunkFilename: isDev ? 'assets/[id].css' : 'assets/[id].[hash].css',
         }),
         new CopyPlugin({
             patterns: [
