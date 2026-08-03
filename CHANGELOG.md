@@ -18,6 +18,12 @@ See also the [v0.107.79 GitHub milestone][ms-v0.107.79].
 NOTE: Add new changes BELOW THIS COMMENT.
 -->
 
+### Security
+
+- AdGuard Home is now more resistant to resource exhaustion attacks when using DNS-over-QUIC.
+
+    This is GHSA-w6v6-f44j-3rj2.  We thank @ATinyShoe for reporting this security issue.
+
 ### Added
 
 - Bootstrap servers configuration now supports comments.
@@ -30,14 +36,11 @@ NOTE: Add new changes BELOW THIS COMMENT.
 
 - The `edge` channel has been switched to the new UI and versioning scheme.
 
-### Fixed
+### Deprecated
 
-- Multiple inaccuracies in the OpenAPI specification:
-    - Wrong property names: `enable` → `enabled` in the Parental status response, `protection_disabled_until` → `protection_disabled_duration` in `ServerStatus`, `ratelimit_subnet_subnet_len_ipv4` and `ratelimit_subnet_subnet_len_ipv6` in `DNSConfig`.
-    - `upstream_mode` enum in `DNSConfig` changed from object to string format for compatibility with code generators.
-    - Missing required properties in `DhcpConfigV4` and `DhcpStatus` schemas.
-    - Missing `port_dnscrypt` and `dnscrypt_config_file` properties in `TlsConfig`.
-    - Split `NetInterface` into `NetInterface` and `DHCPNetInterface` schemas; `GET /dhcp/interfaces` now uses `DHCPNetInterfaces`.
+- `strict_sni_check` is now deprecated.
+
+### Fixed
 
 - Blocked requests without an EDNS(0) OPT record ([#8183]).
 
