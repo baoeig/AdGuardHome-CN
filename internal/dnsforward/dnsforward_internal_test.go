@@ -501,34 +501,6 @@ func TestServer_timeout(t *testing.T) {
 	})
 }
 
-func TestServer_Prepare_fallbacks(t *testing.T) {
-	srvConf := &ServerConfig{
-		TLSConf: &TLSConfig{},
-		Config: Config{
-			FallbackDNS: []string{
-				"#tls://1.1.1.1",
-				"8.8.8.8",
-			},
-			UpstreamMode:     UpstreamModeLoadBalance,
-			EDNSClientSubnet: &EDNSClientSubnet{Enabled: false},
-			ClientsContainer: EmptyClientsContainer{},
-		},
-		ServePlainDNS: true,
-	}
-
-	s, err := NewServer(DNSCreateParams{
-		Logger:            testLogger,
-		TLSConfigProvider: testTLSConfigProvider,
-	})
-	require.NoError(t, err)
-
-	err = s.Prepare(testutil.ContextWithTimeout(t, testTimeout), srvConf)
-	require.NoError(t, err)
-	require.NotNil(t, s.dnsProxy.Fallbacks)
-
-	assert.Len(t, s.dnsProxy.Fallbacks.Upstreams, 1)
-}
-
 func TestServerWithProtectionDisabled(t *testing.T) {
 	s := createTestServer(
 		t,
@@ -837,7 +809,7 @@ func TestBlockedRequest(t *testing.T) {
 func TestServerCustomClientUpstream(t *testing.T) {
 	const defaultCacheSize = 1024 * 1024
 
-	var upsCalledCounter uint32
+	var upsCalledCounter atomic.Uint32
 
 	forwardConf := ServerConfig{
 		UDPListenAddrs: []*net.UDPAddr{{}},
@@ -862,7 +834,7 @@ func TestServerCustomClientUpstream(t *testing.T) {
 	)
 
 	ups := aghtest.NewUpstreamMock(func(req *dns.Msg) (resp *dns.Msg, err error) {
-		atomic.AddUint32(&upsCalledCounter, 1)
+		upsCalledCounter.Add(1)
 
 		return cmp.Or(
 			aghtest.MatchedResponse(req, dns.TypeA, "host", "192.168.0.1"),
@@ -902,11 +874,11 @@ func TestServerCustomClientUpstream(t *testing.T) {
 
 	assert.Equal(t, dns.RcodeSuccess, reply.Rcode)
 	assert.Equal(t, net.IP{192, 168, 0, 1}, reply.Answer[0].(*dns.A).A)
-	assert.Equal(t, uint32(1), atomic.LoadUint32(&upsCalledCounter))
+	assert.Equal(t, uint32(1), upsCalledCounter.Load())
 
 	_, err = dns.Exchange(req, addr)
 	require.NoError(t, err)
-	assert.Equal(t, uint32(1), atomic.LoadUint32(&upsCalledCounter))
+	assert.Equal(t, uint32(1), upsCalledCounter.Load())
 }
 
 // testCNAMEs is a map of names and CNAMEs necessary for the TestUpstream work.
@@ -945,9 +917,9 @@ func TestBlockCNAMEProtectionEnabled(t *testing.T) {
 		IPv4:  testIPv4,
 	}
 
-	s.dnsProxy.UpstreamConfig = &proxy.UpstreamConfig{
-		Upstreams: []upstream.Upstream{testUpstm},
-	}
+	// TODO(m.kazantsev):  Get rid of this manual assignment of upstreams across
+	// the whole project.
+	s.conf.UpstreamConfig.Upstreams = []upstream.Upstream{testUpstm}
 	startDeferStop(t, s)
 
 	addr := s.dnsProxy.Addr(proxy.ProtoUDP)
@@ -1576,10 +1548,10 @@ func TestPTRResponseFromHosts(t *testing.T) {
 		OnHostByIP: func(ip netip.Addr) (host string) { return "" },
 	}
 
-	var eventsCalledCounter uint32
+	var eventsCalledCounter atomic.Uint32
 	watcher := aghtest.NewFSWatcher()
 	watcher.OnEvents = func() (e <-chan aghos.Event) {
-		assert.Equal(t, uint32(1), atomic.AddUint32(&eventsCalledCounter, 1))
+		assert.Equal(t, uint32(1), eventsCalledCounter.Add(1))
 
 		return nil
 	}
@@ -1593,7 +1565,7 @@ func TestPTRResponseFromHosts(t *testing.T) {
 	hc, err := aghnet.NewHostsContainer(ctx, testLogger, testFS, watcher, hostsFilename)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		assert.Equal(t, uint32(1), atomic.LoadUint32(&eventsCalledCounter))
+		assert.Equal(t, uint32(1), eventsCalledCounter.Load())
 	})
 
 	flt, err := filtering.New(&filtering.Config{
