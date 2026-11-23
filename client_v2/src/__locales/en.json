@@ -437,6 +437,7 @@
   "friday": "Friday",
   "gateway_or_subnet_invalid": "Invalid subnet mask",
   "general_statistics": "General statistics",
+  "gfwlist_title": "GFW List",
   "go_back": "Go back",
   "greater_range_start_error": "The end of the range must be greater than the start",
   "home_dns_addresses": "AdGuard Home DNS addresses",

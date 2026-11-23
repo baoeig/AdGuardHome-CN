@@ -86,9 +86,8 @@ type webAPIConfig struct {
 	// clientFS is used to initialize file server.  It must not be nil.
 	clientFS fs.FS
 
-	// clientV2FS is used to serve the optional client_v2 preview.  If nil, the
-	// preview route isn't registered.
-	clientV2FS fs.FS
+	// legacyFS serves the optional classic frontend for GFWList management.
+	legacyFS fs.FS
 
 	// BindAddr is the binding address with port for plain HTTP web interface.
 	BindAddr netip.AddrPort
@@ -274,10 +273,21 @@ func newWebAPI(ctx context.Context, conf *webAPIConfig) (w *webAPI) {
 	clientFS := http.FileServer(http.FS(conf.clientFS))
 
 	mux := conf.mux
-	if conf.clientV2FS != nil && !conf.firstRun {
-		clientV2FS := http.FileServer(http.FS(conf.clientV2FS))
-		mux.Handle("/client_v2/", httputil.Wrap(
-			http.StripPrefix("/client_v2/", clientV2FS),
+	if conf.legacyFS != nil && !conf.firstRun {
+		// Serve the classic entry at the root so its relative control URLs
+		// use the same authenticated API as the default frontend.
+		legacyIndex := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.ServeFileFS(w, r, conf.legacyFS, "index.html")
+		})
+		mux.Handle("GET /legacy.html", httputil.Wrap(
+			legacyIndex,
+			httputil.MiddlewareFunc(w.postInstallHandler),
+			httputil.MiddlewareFunc(gziphandler.GzipHandler),
+		))
+		mux.Handle("GET /legacy/{$}", http.RedirectHandler("/legacy.html", http.StatusFound))
+		mux.Handle("GET /legacy/", httputil.Wrap(
+			http.StripPrefix("/legacy", http.FileServerFS(conf.legacyFS)),
+			httputil.MiddlewareFunc(w.postInstallHandler),
 			httputil.MiddlewareFunc(gziphandler.GzipHandler),
 		))
 	}
@@ -429,11 +439,29 @@ func (web *webAPI) wrapMux(l *slog.Logger) (h http.Handler) {
 	h = logMw.Wrap(h)
 
 	h = web.auth.middleware().Wrap(h)
+	h = redirectFrontendPreview(h)
 
 	// TODO(d.kolyshev):  Remove after DoH is served on a separate address.
 	h = web.wrapDoHRoutes(h)
 
 	return h
+}
+
+// redirectFrontendPreview sends old UI bookmarks through the standard entry
+// point before authentication is checked.
+func redirectFrontendPreview(next http.Handler) (h http.Handler) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			switch r.URL.Path {
+			case "/client_v2", "/client_v2/", "/client_v2/index.html":
+				http.Redirect(w, r, "/", http.StatusFound)
+
+				return
+			}
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 // wrapDoHRoutes returns a handler that serves the DoH routes in front of the

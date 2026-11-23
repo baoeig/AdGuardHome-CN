@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/fstest"
 
 	"github.com/AdguardTeam/AdGuardHome/internal/aghalg"
 	"github.com/AdguardTeam/AdGuardHome/internal/aghos"
@@ -37,6 +38,53 @@ const (
 	testCertificatePath = "./testdata/cert.pem"
 	testPrivateKeyPath  = "./testdata/key.pem"
 )
+
+func TestWebAPI_frontendRoutes(t *testing.T) {
+	web := newTestWeb(t, &webConfig{clientBuildFS: fstest.MapFS{
+		"build/static/index.html": {Data: []byte("new dashboard")},
+		"build/legacy/index.html": {Data: []byte("classic dashboard")},
+		"build/legacy/main.js":    {Data: []byte("classic script")},
+	}})
+
+	for _, tc := range []struct {
+		path string
+		body string
+	}{{
+		path: "/",
+		body: "new dashboard",
+	}, {
+		path: "/legacy.html",
+		body: "classic dashboard",
+	}, {
+		path: "/legacy/main.js",
+		body: "classic script",
+	}} {
+		t.Run(tc.path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			web.conf.mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, tc.path, nil))
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, tc.body, w.Body.String())
+		})
+	}
+}
+
+func TestRedirectFrontendPreview(t *testing.T) {
+	t.Parallel()
+
+	h := redirectFrontendPreview(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	for _, path := range []string{"/client_v2", "/client_v2/", "/client_v2/index.html"} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		assert.Equal(t, http.StatusFound, w.Code)
+		assert.Equal(t, "/", w.Header().Get("Location"))
+	}
+
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/control/status", nil))
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
 
 func TestWebAPI_HandleTLSConfigure(t *testing.T) {
 	// Store the global state before making any changes.

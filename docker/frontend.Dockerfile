@@ -29,7 +29,7 @@
 
 # NOTE:  Keep in sync with .github/workflows/*.
 ARG BASE_IMAGE=adguard/home-js-builder:4.1
-ARG CLIENT_DIR=client
+ARG CLIENT_DIR=client_v2
 
 # The dependencies stage is needed to install packages and tool dependencies.
 # This is also where binaries like osslsigncode, which may be required for tests
@@ -40,6 +40,7 @@ FROM "$BASE_IMAGE" AS dependencies
 ADD Makefile /app/
 ADD scripts /app/scripts
 ARG CLIENT_DIR
+ADD client /app/client
 ADD "${CLIENT_DIR}" "/app/${CLIENT_DIR}"
 WORKDIR /app
 RUN \

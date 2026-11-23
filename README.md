@@ -75,6 +75,9 @@ It operates as a DNS server that re-routes tracking domains to a “black hole�
 
 ## <a href="#getting-started" id="getting-started" name="getting-started">Getting Started</a>
 
+The main address opens the current AdGuard Home interface. Select **Filters →
+GFW List** to manage split DNS routing in the classic interface.
+
 ### <a href="#automated-install-linux-and-mac" id="automated-install-linux-and-mac" name="automated-install-linux-and-mac">Automated install (Linux/Unix/MacOS/FreeBSD/OpenBSD)</a>
 
 To install with `curl` run the following command:
@@ -283,12 +286,12 @@ When you need to debug the frontend without recompiling the production version e
 1. In a separate terminal, run:
 
    ```sh
-   ( cd ./client/ && env NODE_ENV='development' npm run watch )
+   ( cd ./client_v2/ && npm run watch )
    ```
 
 2. Run your `AdGuardHome` binary with the `--local-frontend` flag, which instructs AdGuard Home to ignore the built-in frontend files and use those from the `./build/` directory.
 
-3. Now any changes you make in the `./client/` directory should be recompiled and become available on the web UI. Make sure that you disable the browser cache to make sure that you actually get the recompiled version.
+3. Changes in `./client_v2/` are recompiled and become available in the web UI. Disable the browser cache to load the recompiled files.
 
 [buildx]:       https://docs.docker.com/buildx/working-with-buildx/
 [src-makefile]: https://github.com/baoeig/AdGuardHome-CN/blob/master/Makefile
@@ -297,7 +300,7 @@ When you need to debug the frontend without recompiling the production version e
 
 #### <a href="#e2e-frontend-tests" id="e2e-frontend-tests" name="e2e-frontend-tests">End-to-End (E2E) Frontend Tests</a>
 
-AdGuard Home uses [Playwright](https://playwright.dev) for E2E testing. Tests are located in `tests/e2e`.
+AdGuard Home uses [Playwright](https://playwright.dev) for E2E testing. Run the tests from `client_v2/`.
 
 **Running Tests:**
 
@@ -311,9 +314,9 @@ AdGuard Home uses [Playwright](https://playwright.dev) for E2E testing. Tests ar
 
 **Setup:**
 
-1. Run `npm install` to install dependencies.
+1. Run `make` from the repository root to build the binary and frontend assets.
 
-2. Run `npx playwright install` to set up required browsers.
+2. Run `npx playwright install` from `client_v2/` to set up the test browsers.
 
 > **Warning:** Playwright will download and install its own browser binaries for testing, which may differ from the browsers installed on your system.
 

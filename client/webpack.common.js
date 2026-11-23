@@ -18,7 +18,8 @@ const HTML_INSTALL_PATH = path.resolve(RESOURCES_PATH, 'public/install.html');
 const HTML_LOGIN_PATH = path.resolve(RESOURCES_PATH, 'public/login.html');
 const ASSETS_PATH = path.resolve(RESOURCES_PATH, 'public/assets');
 
-const PUBLIC_PATH = path.resolve(__dirname, '../build/static');
+const isLegacyBuild = process.env.CLIENT_LEGACY_BUILD === '1';
+const PUBLIC_PATH = path.resolve(__dirname, isLegacyBuild ? '../build/legacy' : '../build/static');
 const PUBLIC_ASSETS_PATH = path.resolve(PUBLIC_PATH, 'assets');
 
 const BUILD_ENV = BUILD_ENVS[process.env.BUILD_ENV];
@@ -86,6 +87,7 @@ const config = {
             cache: false,
             chunks: ['main'],
             template: HTML_PATH,
+            publicPath: isLegacyBuild ? 'legacy/' : 'auto',
         }),
         new HtmlWebpackPlugin({
             inject: true,

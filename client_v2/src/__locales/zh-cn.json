@@ -430,6 +430,7 @@
   "friday": "星期五",
   "gateway_or_subnet_invalid": "子网掩码无效",
   "general_statistics": "概况统计",
+  "gfwlist_title": "GFW 列表",
   "go_back": "返回",
   "greater_range_start_error": "范围结束值必须大于起始值",
   "home_dns_addresses": "AdGuard Home DNS 地址",

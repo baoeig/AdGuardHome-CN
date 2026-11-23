@@ -450,7 +450,7 @@ func (mw *authMiddlewareDefault) handlePublicAccess(
 		return true
 	}
 
-	if path == "/" || path == "/index.html" {
+	if path == "/" || path == "/index.html" || path == "/legacy.html" {
 		http.Redirect(w, r, "login.html", http.StatusFound)
 
 		return true

@@ -19,9 +19,7 @@ GO.MACRO = $${GO:-go}
 VERBOSE.MACRO = $${VERBOSE:-0}
 
 CHANNEL = development
-# TODO(ik): Update CLIENT_DIR to client_v2 for new frontend migration
-CLIENT_DIR = client
-CLIENT_V2_DIR = client_v2
+CLIENT_DIR = client_v2
 DIST_DIR = dist
 GOAMD64 = v1
 GOPROXY = https://proxy.golang.org|direct
@@ -31,9 +29,7 @@ GPG_KEY = devteam@adguard.com
 GPG_KEY_PASSPHRASE = not-a-real-password
 NPM = npm
 NPM_FLAGS = --prefix $(CLIENT_DIR)
-NPM_FLAGS_V2 = --prefix $(CLIENT_V2_DIR)
 NPM_INSTALL_FLAGS = $(NPM_FLAGS) --quiet --no-progress
-NPM_INSTALL_FLAGS_V2 = $(NPM_FLAGS_V2) --quiet --no-progress
 RACE = 0
 REVISION = $${REVISION:-$$(git rev-parse --short HEAD)}
 SIGN = 1
@@ -110,14 +106,14 @@ pack-release:  ; $(RELEASE_ENV) "$(SHELL)" ./scripts/make/pack-release.sh
 .PHONY: js-build js-deps js-typecheck js-lint js-storybook js-storybook-build js-test js-test-e2e
 js-build:
 	$(NPM) $(NPM_FLAGS) run build-prod
-	$(NPM) $(NPM_FLAGS_V2) run build-preview
+	if [ '$(CLIENT_DIR)' = 'client_v2' ]; then $(NPM) --prefix client run build-legacy; fi
 js-deps:
 	$(NPM) $(NPM_INSTALL_FLAGS) ci
-	$(NPM) $(NPM_INSTALL_FLAGS_V2) ci
+	if [ '$(CLIENT_DIR)' = 'client_v2' ]; then $(NPM) --prefix client --quiet --no-progress ci; fi
 js-typecheck:       ; $(NPM) $(NPM_FLAGS) run typecheck
 js-lint:            ; $(NPM) $(NPM_FLAGS) run lint
-js-storybook:       ; $(NPM) $(NPM_FLAGS_V2) run storybook
-js-storybook-build: ; $(NPM) $(NPM_FLAGS_V2) run build-storybook
+js-storybook:       ; $(NPM) $(NPM_FLAGS) run storybook
+js-storybook-build: ; $(NPM) $(NPM_FLAGS) run build-storybook
 js-test:            ; $(NPM) $(NPM_FLAGS) run test
 js-test-e2e:        ; $(NPM) $(NPM_FLAGS) run test:e2e
 

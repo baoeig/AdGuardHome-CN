@@ -57,6 +57,10 @@ const ClientScheduleRoute = () => <ClientSchedule />;
 const ClientBlockedServicesRoute = () => <ClientBlockedServices />;
 const ProtectionRoute = () => <Protection />;
 const AddClientRoute = () => <AddClient />;
+const GfwListRoute = (): null => {
+    onMount(() => window.location.replace('legacy.html#gfwlist'));
+    return null;
+};
 
 const App = () => {
     onMount(() => {
@@ -193,6 +197,7 @@ const App = () => {
             <Route path={Paths.DnsBlocklists} component={Blocklists} />
             <Route path={Paths.DnsAllowlists} component={Allowlists} />
             <Route path={Paths.CustomRules} component={UserRules} />
+            <Route path={Paths.GfwList} component={GfwListRoute} />
             <Route path={Paths.DnsRewrites} component={DNSRewrites} />
             <Route path={Paths.Dhcp} component={Dhcp} />
             <Route path={Paths.DhcpLeases} component={LeasesPage} />

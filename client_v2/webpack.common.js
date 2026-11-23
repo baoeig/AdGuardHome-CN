@@ -20,9 +20,7 @@ const HTML_LOGIN_PATH = path.resolve(RESOURCES_PATH, 'public/login.html');
 const HTML_FORGOT_PASSWORD_PATH = path.resolve(RESOURCES_PATH, 'public/forgot_password.html');
 const ASSETS_PATH = path.resolve(RESOURCES_PATH, 'public/assets');
 
-const isPreview = process.env.CLIENT_V2_PREVIEW === '1';
-
-const PUBLIC_PATH = path.resolve(RESOURCES_PATH, isPreview ? '../build/client_v2' : '../build/static');
+const PUBLIC_PATH = path.resolve(RESOURCES_PATH, '../build/static');
 const PUBLIC_ASSETS_PATH = path.resolve(PUBLIC_PATH, 'assets');
 
 const BUILD_ENV = BUILD_ENVS[process.env.BUILD_ENV];
@@ -46,7 +44,6 @@ const config = {
         path: PUBLIC_PATH,
         filename: '[name].[chunkhash].js',
         chunkFilename: 'assets/[name].[chunkhash].js',
-        publicPath: isPreview ? '/client_v2/' : '/',
     },
     resolve: {
         modules: ['node_modules'],

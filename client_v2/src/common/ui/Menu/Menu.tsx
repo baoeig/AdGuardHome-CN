@@ -113,6 +113,11 @@ export const Menu = (props: Props) => {
                             path: Paths.CustomRules,
                             routePath: RoutePath.CustomRules,
                         },
+                        {
+                            label: intl.getMessage('gfwlist_title'),
+                            path: Paths.GfwList,
+                            routePath: RoutePath.GfwList,
+                        },
                     ]}
                     isActive={isActive}
                 />
