@@ -21,6 +21,7 @@ import (
 	"github.com/AdguardTeam/AdGuardHome/internal/aghslog"
 	"github.com/AdguardTeam/AdGuardHome/internal/aghtls"
 	"github.com/AdguardTeam/AdGuardHome/internal/client"
+	"github.com/AdguardTeam/AdGuardHome/internal/configmgr"
 	"github.com/AdguardTeam/AdGuardHome/internal/filtering"
 	"github.com/AdguardTeam/AdGuardHome/internal/querylog"
 	"github.com/AdguardTeam/AdGuardHome/internal/rdns"
@@ -32,6 +33,7 @@ import (
 	"github.com/AdguardTeam/golibs/netutil"
 	"github.com/AdguardTeam/golibs/netutil/sysresolv"
 	"github.com/AdguardTeam/golibs/stringutil"
+	"github.com/AdguardTeam/golibs/timeutil"
 	"github.com/miekg/dns"
 )
 
@@ -43,10 +45,20 @@ const DefaultTimeout = 10 * time.Second
 // faster than ordinary upstreams.
 const defaultLocalTimeout = 1 * time.Second
 
-var defaultDNS = []string{
-	"https://dns10.quad9.net/dns-query",
+// defaultDNSUpstream is the default DNS upstream URL.
+var defaultDNSUpstream = []string{
+	"https://cloudflare-dns.com/dns-query",
 }
-var defaultBootstrap = []string{"9.9.9.10", "149.112.112.10", "2620:fe::10", "2620:fe::fe:10"}
+
+// defaultDNSBootstrap are the default DNS servers for bootstrapping.
+//
+// TODO(ameshkov, a.garipov):  Consider using TLS.
+var defaultDNSBootstrap = []string{
+	"1.0.0.1",
+	"1.1.1.1",
+	"2606:4700:4700::1001",
+	"2606:4700:4700::1111",
+}
 
 // Often requested by all kinds of DNS probes
 var defaultBlockedHosts = []string{"version.bind", "id.server", "hostname.bind"}
@@ -125,12 +137,13 @@ type Server struct {
 	// PTR resolving.
 	sysResolvers SystemResolvers
 
-	// tlsConfigProvider provides TLS configuration for the server.  It must not
+	// tlsManager provides TLS configuration for the server.  It must not
 	// be nil.
-	tlsConfigProvider aghtls.TLSConfigProvider
+	tlsManager aghtls.Manager
 
-	// access drops disallowed clients.
-	access *accessManager
+	// access drops disallowed clients.  It is an atomic pointer to avoid
+	// reacquiring serverLock during client lookups in query accounting.
+	access atomic.Pointer[accessManager]
 
 	// anonymizer masks the client's IP addresses if needed.
 	anonymizer *aghnet.IPMut
@@ -203,17 +216,23 @@ const defaultLocalDomainSuffix = "lan"
 
 // DNSCreateParams are parameters to create a new server.
 type DNSCreateParams struct {
-	DNSFilter   *filtering.DNSFilter
-	Stats       stats.Interface
-	QueryLog    querylog.QueryLog
-	DHCPServer  DHCP
-	PrivateNets netutil.SubnetSet
-	Anonymizer  *aghnet.IPMut
-	EtcHosts    *aghnet.HostsContainer
+	DNSFilter  *filtering.DNSFilter
+	Stats      stats.Interface
+	QueryLog   querylog.QueryLog
+	DHCPServer DHCP
 
-	// TLSConfigProvider provides a TLS configuration for the server.  It must
+	// PrivateNets contains the private network subnets.  It must not be nil.
+	PrivateNets netutil.SubnetSet
+
+	Anonymizer *aghnet.IPMut
+
+	// EtcHosts, if not nil, is used along with the bootstrap addresses to
+	// initialize upstream configuration.
+	EtcHosts *aghnet.HostsContainer
+
+	// TLSManager provides a TLS configuration for the server.  It must
 	// not be nil.
-	TLSConfigProvider aghtls.TLSConfigProvider
+	TLSManager aghtls.Manager
 
 	// Logger is used as a base logger.  It must not be nil.
 	Logger *slog.Logger
@@ -263,7 +282,7 @@ func NewServer(p DNSCreateParams) (s *Server, err error) {
 		conf: ServerConfig{
 			ServePlainDNS: true,
 		},
-		tlsConfigProvider: p.TLSConfigProvider,
+		tlsManager: p.TLSManager,
 	}
 
 	s.sysResolvers, err = sysresolv.NewSystemResolvers(nil, defaultPlainDNSPort)
@@ -273,7 +292,7 @@ func NewServer(p DNSCreateParams) (s *Server, err error) {
 
 	if runtime.GOARCH == "mips" || runtime.GOARCH == "mipsle" {
 		// Use plain DNS on MIPS, encryption is too slow
-		defaultDNS = defaultBootstrap
+		defaultDNSUpstream = defaultDNSBootstrap
 	}
 
 	return s, nil
@@ -299,29 +318,67 @@ func (s *Server) Close(ctx context.Context) {
 	}
 }
 
-// WriteDiskConfig - write configuration
-func (s *Server) WriteDiskConfig(c *Config) {
+// WriteDiskConfig puts the Server's configuration to the dc.  dc must not be
+// nil.
+func (s *Server) WriteDiskConfig(dc *configmgr.DNSConfig) {
 	s.serverLock.RLock()
 	defer s.serverLock.RUnlock()
 
 	sc := s.conf.Config
-	*c = sc
-	c.RatelimitWhitelist = slices.Clone(sc.RatelimitWhitelist)
-	c.BootstrapDNS = slices.Clone(sc.BootstrapDNS)
-	c.FallbackDNS = slices.Clone(sc.FallbackDNS)
-	c.AllowedClients = slices.Clone(sc.AllowedClients)
-	c.DisallowedClients = slices.Clone(sc.DisallowedClients)
-	c.BlockedHosts = slices.Clone(sc.BlockedHosts)
-	c.TrustedProxies = slices.Clone(sc.TrustedProxies)
-	c.UpstreamDNS = slices.Clone(sc.UpstreamDNS)
-}
 
-// LocalPTRResolvers returns the current local PTR resolver configuration.
-func (s *Server) LocalPTRResolvers() (localPTRResolvers []string) {
-	s.serverLock.RLock()
-	defer s.serverLock.RUnlock()
+	dc.EDNSClientSubnet = &configmgr.EDNSClientSubnet{
+		CustomIP:  sc.EDNSClientSubnet.CustomIP,
+		Enabled:   sc.EDNSClientSubnet.Enabled,
+		UseCustom: sc.EDNSClientSubnet.UseCustom,
+	}
+	dc.GFWList = nil
+	if gfw := sc.GFWList; gfw != nil {
+		dc.GFWList = &configmgr.GFWListConfig{
+			Enabled:        gfw.Enabled,
+			URL:            gfw.URL,
+			UpstreamDNS:    slices.Clone(gfw.UpstreamDNS),
+			UpdateInterval: gfw.UpdateInterval,
+			CustomDomains:  slices.Clone(gfw.CustomDomains),
+		}
+	}
 
-	return slices.Clone(s.conf.LocalPTRResolvers)
+	dc.IpsetListFileName = sc.IpsetListFileName
+	dc.UpstreamDNSFileName = sc.UpstreamDNSFileName
+	dc.UpstreamMode = sc.UpstreamMode
+
+	dc.RatelimitWhitelist = slices.Clone(sc.RatelimitWhitelist)
+	dc.TrustedProxies = slices.Clone(sc.TrustedProxies)
+	dc.AllowedClients = slices.Clone(sc.AllowedClients)
+	dc.BlockedHosts = slices.Clone(sc.BlockedHosts)
+	dc.BogusNXDomain = slices.Clone(sc.BogusNXDomain)
+	dc.BootstrapDNS = slices.Clone(sc.BootstrapDNS)
+	dc.DisallowedClients = slices.Clone(sc.DisallowedClients)
+	dc.FallbackDNS = slices.Clone(sc.FallbackDNS)
+	dc.IpsetList = slices.Clone(sc.IpsetList)
+	dc.PrivateRDNSResolvers = slices.Clone(s.conf.LocalPTRResolvers)
+	dc.UpstreamDNS = slices.Clone(sc.UpstreamDNS)
+
+	dc.CacheOptimisticAnswerTTL = sc.CacheOptimisticAnswerTTL
+	dc.CacheOptimisticMaxAge = sc.CacheOptimisticMaxAge
+	dc.FastestTimeout = sc.FastestTimeout
+	dc.UpstreamTimeout = timeutil.Duration(s.conf.UpstreamTimeout)
+
+	dc.MaxGoroutines = sc.MaxGoroutines
+	dc.RatelimitSubnetLenIPv4 = sc.RatelimitSubnetLenIPv4
+	dc.RatelimitSubnetLenIPv6 = sc.RatelimitSubnetLenIPv6
+	dc.CacheSize = sc.CacheSize
+	dc.CacheMinTTL = sc.CacheMinTTL
+	dc.CacheMaxTTL = sc.CacheMaxTTL
+	dc.Ratelimit = sc.Ratelimit
+
+	dc.AAAADisabled = sc.AAAADisabled
+	dc.BootstrapPreferIPv6 = sc.BootstrapPreferIPv6
+	dc.CacheEnabled = sc.CacheEnabled
+	dc.CacheOptimistic = sc.CacheOptimistic
+	dc.EnableDNSSEC = sc.EnableDNSSEC
+	dc.HandleDDR = sc.HandleDDR
+	dc.RefuseAny = sc.RefuseAny
+	dc.UsePrivateRDNS = s.conf.UsePrivateRDNS
 }
 
 // AddrProcConfig returns the current address processing configuration.  Only
@@ -335,14 +392,6 @@ func (s *Server) AddrProcConfig() (c *client.DefaultAddrProcConfig) {
 		UseRDNS:        s.conf.AddrProcConf.UseRDNS,
 		UseWHOIS:       s.conf.AddrProcConf.UseWHOIS,
 	}
-}
-
-// UpstreamTimeout returns the current upstream timeout configuration.
-func (s *Server) UpstreamTimeout() (t time.Duration) {
-	s.serverLock.RLock()
-	defer s.serverLock.RUnlock()
-
-	return s.conf.UpstreamTimeout
 }
 
 // Resolve gets IP addresses by host name from an upstream server.  No
@@ -384,11 +433,9 @@ func (s *Server) Exchange(
 
 	arpa = dns.Fqdn(arpa)
 	req := &dns.Msg{
-		MsgHdr: dns.MsgHdr{
-			Id:               dns.Id(),
-			RecursionDesired: true,
-		},
-		Compress: true,
+		Id:               dns.Id(),
+		RecursionDesired: true,
+		Compress:         true,
 		Question: []dns.Question{{
 			Name:   arpa,
 			Qtype:  dns.TypePTR,
@@ -517,7 +564,7 @@ func (s *Server) Prepare(ctx context.Context, conf *ServerConfig) (err error) {
 
 	s.setupDNS64()
 
-	s.access, err = newAccessCtx(
+	a, err := newAccessManager(
 		s.conf.AllowedClients,
 		s.conf.DisallowedClients,
 		s.conf.BlockedHosts,
@@ -525,6 +572,8 @@ func (s *Server) Prepare(ctx context.Context, conf *ServerConfig) (err error) {
 	if err != nil {
 		return fmt.Errorf("preparing access: %w", err)
 	}
+
+	s.access.Store(a)
 
 	proxyConfig.Fallbacks, err = s.setupFallbackDNS()
 	if err != nil {
@@ -554,7 +603,7 @@ func (s *Server) prepareUpstreamSettings(ctx context.Context, boot upstream.Reso
 		return fmt.Errorf("loading upstreams: %w", err)
 	}
 
-	uc, err := newUpstreamConfig(ctx, s.logger, upstreams, defaultDNS, &upstream.Options{
+	uc, err := newUpstreamConfig(ctx, s.logger, upstreams, defaultDNSUpstream, &upstream.Options{
 		Logger:       aghslog.NewForUpstream(s.baseLogger, aghslog.UpstreamTypeMain),
 		Bootstrap:    boot,
 		Timeout:      s.conf.UpstreamTimeout,
@@ -567,7 +616,7 @@ func (s *Server) prepareUpstreamSettings(ctx context.Context, boot upstream.Reso
 		// See [aghtls.SystemRootCAs].
 		//
 		// TODO(a.garipov): Investigate if that's true.
-		RootCAs:      s.conf.TLSv12Roots,
+		RootCAs:      s.tlsManager.RootCAs(),
 		CipherSuites: s.conf.TLSCiphers,
 	})
 	if err != nil {
@@ -779,11 +828,8 @@ func (s *Server) prepareInternalProxy() (err error) {
 		UsePrivateRDNS:            srvConf.UsePrivateRDNS,
 		PrivateSubnets:            s.privateNets,
 		MessageConstructor:        s,
-	}
-
-	err = setProxyUpstreamMode(conf, srvConf.UpstreamMode, time.Duration(srvConf.FastestTimeout))
-	if err != nil {
-		return fmt.Errorf("invalid upstream mode: %w", err)
+		UpstreamMode:              srvConf.UpstreamMode,
+		FastestPingTimeout:        time.Duration(srvConf.FastestTimeout),
 	}
 
 	s.internalProxy, err = proxy.New(conf)
@@ -920,16 +966,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // IsBlockedClient returns true if the client is blocked by the current access
 // settings.
 func (s *Server) IsBlockedClient(ip netip.Addr, clientID string) (blocked bool, rule string) {
-	s.serverLock.RLock()
-	defer s.serverLock.RUnlock()
+	a := s.access.Load()
 
 	blockedByIP := false
 	if ip != (netip.Addr{}) {
-		blockedByIP, rule = s.access.isBlockedIP(ip)
+		blockedByIP, rule = a.isBlockedIP(ip)
 	}
 
-	allowlistMode := s.access.allowlistMode()
-	blockedByClientID := s.access.isBlockedClientID(clientID)
+	allowlistMode := a.allowlistMode()
+	blockedByClientID := a.isBlockedClientID(clientID)
 
 	// TODO(s.chzhen):  Pass context.
 	ctx := context.TODO()

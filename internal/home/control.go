@@ -12,7 +12,6 @@ import (
 	"github.com/AdguardTeam/AdGuardHome/internal/aghhttp"
 	"github.com/AdguardTeam/AdGuardHome/internal/aghnet"
 	"github.com/AdguardTeam/AdGuardHome/internal/aghtls"
-	"github.com/AdguardTeam/AdGuardHome/internal/dnsforward"
 	"github.com/AdguardTeam/AdGuardHome/internal/version"
 	"github.com/AdguardTeam/golibs/httphdr"
 	"github.com/AdguardTeam/golibs/netutil"
@@ -80,7 +79,8 @@ func collectDNSAddresses(extTLSConf *aghtls.ExtendedTLSConfig) (addrs []string, 
 		}
 	}
 
-	de := getDNSEncryption(extTLSConf)
+	hasDoHRoutes := len(config.HTTPConfig.DoH.Routes) > 0
+	de := getDNSEncryption(extTLSConf, hasDoHRoutes)
 	if de.https != "" {
 		addrs = append(addrs, de.https)
 	}
@@ -122,7 +122,7 @@ func (web *webAPI) handleStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	l := web.logger
 
-	extTLSConfig := web.tlsConfProvider.ExtendedTLSConfig()
+	extTLSConfig := web.tlsManager.ExtendedTLSConfig()
 
 	dnsAddrs, err := collectDNSAddresses(extTLSConfig)
 	if err != nil {
@@ -134,13 +134,10 @@ func (web *webAPI) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var (
-		fltConf           *dnsforward.Config
 		protDisabledUntil *time.Time
 		protEnabled       bool
 	)
 	if globalContext.dnsServer != nil {
-		fltConf = &dnsforward.Config{}
-		globalContext.dnsServer.WriteDiskConfig(fltConf)
 		protEnabled, protDisabledUntil = globalContext.dnsServer.UpdatedProtectionStatus(ctx)
 	}
 
@@ -193,16 +190,6 @@ func (web *webAPI) registerControlHandlers() {
 	web.httpReg.Register(http.MethodPost, "/control/update", web.handleUpdate)
 
 	web.httpReg.Register(http.MethodGet, "/control/status", web.handleStatus)
-	web.httpReg.Register(
-		http.MethodPost,
-		"/control/i18n/change_language",
-		web.handleI18nChangeLanguage,
-	)
-	web.httpReg.Register(
-		http.MethodGet,
-		"/control/i18n/current_language",
-		web.handleI18nCurrentLanguage,
-	)
 	web.httpReg.Register(http.MethodGet, "/control/profile", web.handleGetProfile)
 	web.httpReg.Register(http.MethodPut, "/control/profile/update", web.handlePutProfile)
 

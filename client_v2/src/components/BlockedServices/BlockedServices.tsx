@@ -3,7 +3,8 @@ import cn from 'clsx';
 import intl from 'panel/common/intl';
 import { Input } from 'panel/common/controls/Input';
 import { Icon } from 'panel/common/ui/Icon';
-import { Link } from 'panel/common/ui/Link';
+import { SettingLink } from 'panel/common/ui/SettingLink';
+import { SwitchGroup } from 'panel/common/ui/SettingsGroup';
 import { updateClientFormField, clientFormState } from 'panel/stores/clientForm';
 import theme from 'panel/lib/theme';
 import {
@@ -46,6 +47,8 @@ export const BlockedServices = (props: Props) => {
     const [search, setSearch] = createSignal('');
     const [groupFilter, setGroupFilter] = createSignal<string[]>([]);
     const [togglingId, setTogglingId] = createSignal<string | null>(null);
+    const [showBlockedOnly, setShowBlockedOnly] = createSignal(false);
+    const [showUnblockedOnly, setShowUnblockedOnly] = createSignal(false);
 
     onMount(() => {
         if (!props.clientScope) {
@@ -98,6 +101,13 @@ export const BlockedServices = (props: Props) => {
                 return groupId && selected.has(groupId);
             });
         }
+        if (showBlockedOnly()) {
+            const bSet = blockedSet();
+            filtered = filtered.filter((service) => bSet.has(service.id));
+        } else if (showUnblockedOnly()) {
+            const bSet = blockedSet();
+            filtered = filtered.filter((service) => !bSet.has(service.id));
+        }
         const term = search().trim().toLowerCase();
         if (term) {
             filtered = filtered.filter(
@@ -118,6 +128,16 @@ export const BlockedServices = (props: Props) => {
         );
     };
 
+    const handleToggleStateFilter = (filter: 'blocked' | 'unblocked') => {
+        if (filter === 'blocked') {
+            setShowBlockedOnly((v) => !v);
+            setShowUnblockedOnly(false);
+        } else {
+            setShowUnblockedOnly((v) => !v);
+            setShowBlockedOnly(false);
+        }
+    };
+
     const handleToggleService = (serviceId: string, checked: boolean) => {
         if (props.clientScope) {
             const currentIds: string[] = clientFormState.blocked_services || [];
@@ -135,6 +155,13 @@ export const BlockedServices = (props: Props) => {
         updateBlockedServices({ ids: newIds, schedule: servicesState.list?.schedule });
     };
 
+    const handleUseGlobalBlockedServices = (e: Event) => {
+        updateClientFormField({
+            field: 'use_global_blocked_services',
+            value: (e.target as HTMLInputElement).checked,
+        });
+    };
+
     const handleSearchChange = (e: Event) => {
         setSearch((e.target as HTMLInputElement).value);
     };
@@ -147,7 +174,7 @@ export const BlockedServices = (props: Props) => {
         (servicesState.allServices == null || servicesState.allServices.length === 0) &&
         (servicesState.processingAll || servicesState.processing);
     const isGloballyDisabled = () =>
-        props.clientScope ? clientFormState.use_global_settings : false;
+        props.clientScope ? clientFormState.use_global_blocked_services : false;
 
     const getScheduleRoute = () => {
         if (!props.clientScope) {
@@ -166,6 +193,26 @@ export const BlockedServices = (props: Props) => {
     return (
         <Show when={!isInitialLoading()}>
             <div class={cn(theme.layout.container, props.class)}>
+                <Show when={props.breadcrumbs}>
+                    <div class={s.breadcrumbs}>
+                        <Breadcrumbs
+                            parentLinks={props.breadcrumbs!.parentLinks}
+                            currentTitle={props.breadcrumbs!.currentTitle}
+                        />
+                    </div>
+                    <h1
+                        class={cn(
+                            theme.layout.title,
+                            theme.title.h4,
+                            theme.title.h3_tablet,
+                            s.clientsTitle,
+                        )}
+                    >
+                        {intl.getMessage('blocked_services')}
+                    </h1>
+                    <p class={s.description}>{intl.getMessage('blocked_services_desc')}</p>
+                </Show>
+
                 <div class={cn(theme.layout.containerIn, theme.layout.containerIn_one_col)}>
                     <Show when={!props.clientScope && !props.breadcrumbs}>
                         <div class={s.header}>
@@ -183,98 +230,133 @@ export const BlockedServices = (props: Props) => {
                         </div>
                     </Show>
 
-                    <Show when={props.breadcrumbs}>
-                        <div class={s.breadcrumbs}>
-                            <Breadcrumbs
-                                parentLinks={props.breadcrumbs!.parentLinks}
-                                currentTitle={props.breadcrumbs!.currentTitle}
+                    <Show when={props.clientScope}>
+                        <div class={s.toggle}>
+                            <SwitchGroup
+                                id="use-global-blocked-services"
+                                title={intl.getMessage('clients_use_global_blocked_services')}
+                                description={intl.getMessage(
+                                    'clients_use_global_blocked_services_desc',
+                                )}
+                                checked={clientFormState.use_global_blocked_services}
+                                onChange={handleUseGlobalBlockedServices}
                             />
                         </div>
-                        <h1
-                            class={cn(
-                                theme.layout.title,
-                                theme.title.h4,
-                                theme.title.h3_tablet,
-                                s.clientsTitle,
-                            )}
-                        >
-                            {intl.getMessage('blocked_services')}
-                        </h1>
-                        <p class={s.description}>{intl.getMessage('blocked_services_desc')}</p>
                     </Show>
 
-                    <Link
+                    <SettingLink
                         to={getScheduleRoute()}
-                        props={scheduleRouteProps()}
-                        class={s.navItem}
+                        linkProps={scheduleRouteProps()}
+                        title={intl.getMessage('inactivity_schedule')}
+                        description={
+                            isGloballyDisabled()
+                                ? intl.getMessage('clients_global_inactivity_schedule_note')
+                                : intl.getMessage('inactivity_schedule_desc')
+                        }
+                        disabled={isGloballyDisabled()}
                         data-testid="blocked-services-schedule-link"
-                    >
-                        <div class={s.navItemContent}>
-                            <div class={s.navItemTitle}>
-                                {intl.getMessage('inactivity_schedule')}
-                            </div>
-                            <div class={s.navItemDesc}>
-                                {intl.getMessage('inactivity_schedule_desc')}
-                            </div>
-                        </div>
-                        <Icon icon="arrow" color="gray" />
-                    </Link>
-
-                    <div class={s.search}>
-                        <Input
-                            id="blocked-services-search"
-                            data-testid="blocked-services-search"
-                            type="text"
-                            value={search()}
-                            onInput={handleSearchChange}
-                            placeholder={intl.getMessage('search_placeholder')}
-                            prefixIcon={<Icon icon="search" class={s.searchIcon} color="gray" />}
-                            suffixIcon={
-                                <Show when={search()}>
-                                    <button
-                                        type="button"
-                                        onClick={handleSearchClear}
-                                        class={s.clearButton}
-                                        aria-label={intl.getMessage('clear_btn')}
-                                        data-testid="blocked-services-search-clear"
-                                    >
-                                        <Icon icon="cross" color="gray" />
-                                    </button>
-                                </Show>
-                            }
-                        />
-                    </div>
-
-                    <GroupFilter
-                        groups={servicesState.allGroups || []}
-                        activeGroups={groupFilter()}
-                        onToggleGroup={handleToggleGroup}
-                        data-testid="blocked-services-groups"
                     />
 
-                    <div class={s.servicesList} data-testid="blocked-services-list">
-                        <Show
-                            when={filteredServices().length === 0}
-                            fallback={
-                                <For each={filteredServices()}>
-                                    {(service) => (
-                                        <ServiceRow
-                                            id={service.id}
-                                            name={service.name}
-                                            iconSvg={service.icon_svg}
-                                            checked={blockedSet().has(service.id)}
-                                            disabled={
-                                                isGloballyDisabled() || togglingId() === service.id
-                                            }
-                                            onChange={handleToggleService}
-                                        />
-                                    )}
-                                </For>
-                            }
+                    <Show when={isGloballyDisabled()}>
+                        <div
+                            class={cn(theme.text.t3, s.globalNote)}
+                            data-testid="blocked-services-global-note"
                         >
-                            <NothingFound />
-                        </Show>
-                    </div>
+                            <Icon icon="settings_info" color="gray" class={s.nothingFoundIcon} />
+                            <div class={s.globalNoteText}>
+                                {intl.getMessage('clients_global_blocked_services_note')}
+                            </div>
+                        </div>
+                    </Show>
+
+                    <Show when={!isGloballyDisabled()}>
+                        <div class={s.search}>
+                            <Input
+                                id="blocked-services-search"
+                                data-testid="blocked-services-search"
+                                type="text"
+                                value={search()}
+                                onInput={handleSearchChange}
+                                placeholder={intl.getMessage('search_placeholder')}
+                                prefixIcon={
+                                    <Icon icon="search" class={s.searchIcon} color="gray" />
+                                }
+                                suffixIcon={
+                                    <Show when={search()}>
+                                        <button
+                                            type="button"
+                                            onClick={handleSearchClear}
+                                            class={s.clearButton}
+                                            aria-label={intl.getMessage('clear_btn')}
+                                            data-testid="blocked-services-search-clear"
+                                        >
+                                            <Icon icon="cross" color="gray" />
+                                        </button>
+                                    </Show>
+                                }
+                                size="large"
+                            />
+                        </div>
+
+                        <GroupFilter
+                            groups={servicesState.allGroups || []}
+                            activeGroups={groupFilter()}
+                            onToggleGroup={handleToggleGroup}
+                            data-testid="blocked-services-groups"
+                        >
+                            <button
+                                type="button"
+                                class={cn(s.groupButton, {
+                                    [s.groupButtonActive]: showBlockedOnly(),
+                                })}
+                                onClick={() => handleToggleStateFilter('blocked')}
+                                aria-pressed={showBlockedOnly()}
+                                data-testid="blocked-services-show-blocked-only"
+                            >
+                                {intl.getMessage('blocked_only')}
+                            </button>
+                            <button
+                                type="button"
+                                class={cn(s.groupButton, {
+                                    [s.groupButtonActive]: showUnblockedOnly(),
+                                })}
+                                onClick={() => handleToggleStateFilter('unblocked')}
+                                aria-pressed={showUnblockedOnly()}
+                                data-testid="blocked-services-show-unblocked-only"
+                            >
+                                {intl.getMessage('unblocked_only')}
+                            </button>
+                            <span
+                                class={s.filtersDivider}
+                                data-testid="blocked-services-filters-divider"
+                            />
+                        </GroupFilter>
+
+                        <div class={s.servicesList} data-testid="blocked-services-list">
+                            <Show
+                                when={filteredServices().length === 0}
+                                fallback={
+                                    <For each={filteredServices()}>
+                                        {(service) => (
+                                            <ServiceRow
+                                                id={service.id}
+                                                name={service.name}
+                                                iconSvg={service.icon_svg}
+                                                checked={blockedSet().has(service.id)}
+                                                disabled={
+                                                    isGloballyDisabled() ||
+                                                    togglingId() === service.id
+                                                }
+                                                onChange={handleToggleService}
+                                            />
+                                        )}
+                                    </For>
+                                }
+                            >
+                                <NothingFound />
+                            </Show>
+                        </div>
+                    </Show>
                 </div>
             </div>
         </Show>

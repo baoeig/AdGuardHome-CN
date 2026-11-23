@@ -25,10 +25,10 @@
 #    Docker daemon, which can invalidate the cache.
 #
 # 6. Add a CACHE_BUSTER argument to stages to be able to rerun the stages if
-#    needed.  Keep it in sync with bamboo-specs/bamboo.yaml.
+#    needed.  Keep it in sync with .github/workflows/*.
 
-# NOTE:  Keep in sync with bamboo-specs/bamboo.yaml.
-ARG BASE_IMAGE=adguard/home-js-builder:4.0
+# NOTE:  Keep in sync with .github/workflows/*.
+ARG BASE_IMAGE=adguard/home-js-builder:4.1
 ARG CLIENT_DIR=client
 
 # The dependencies stage is needed to install packages and tool dependencies.
@@ -127,4 +127,5 @@ EOF
 FROM scratch AS builder-exporter
 ARG CACHE_BUSTER=0
 ARG CLIENT_DIR
-COPY --from=builder /app/build /build
+ARG DIST_DIR="build"
+COPY --from=builder /app/${DIST_DIR} /${DIST_DIR}

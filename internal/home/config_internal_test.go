@@ -4,10 +4,14 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/AdguardTeam/AdGuardHome/internal/dnsforward"
 	"github.com/AdguardTeam/golibs/testutil"
+	"github.com/AdguardTeam/golibs/timeutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	yaml "go.yaml.in/yaml/v4"
 )
 
 func TestConfigFilePath(t *testing.T) {
@@ -88,4 +92,24 @@ func TestConfigFilePath(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestDNSConfigToInternal_gfwList(t *testing.T) {
+	const data = `dns:
+  gfwlist:
+    enabled: true
+    url: https://example.org/gfwlist.txt
+    upstream_dns: [1.1.1.1]
+    update_interval: 24h
+    custom_domains: [example.com]
+`
+	conf := &configuration{}
+	require.NoError(t, yaml.Unmarshal([]byte(data), conf))
+	assert.Equal(t, &dnsforward.GFWListConfig{
+		Enabled:        true,
+		URL:            "https://example.org/gfwlist.txt",
+		UpstreamDNS:    []string{"1.1.1.1"},
+		UpdateInterval: timeutil.Duration(24 * time.Hour),
+		CustomDomains:  []string{"example.com"},
+	}, dnsConfigToInternal(&conf.DNS, dnsforward.EmptyClientsContainer{}).GFWList)
 }

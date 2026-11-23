@@ -59,13 +59,14 @@ export const ConfirmDialog = (props: Props) => (
                         size="small"
                         onClick={props.onClose}
                         class={theme.dialog.button}
+                        onCard
                     >
                         {props.cancelText}
                     </Button>
                 </div>
             }
         >
-            {props.customFooter}
+            <div class={theme.dialog.footer}>{props.customFooter}</div>
         </Show>
     </Dialog>
 );

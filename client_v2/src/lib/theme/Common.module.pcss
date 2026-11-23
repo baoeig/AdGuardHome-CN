@@ -6,6 +6,10 @@
     white-space: nowrap;
 }
 
+.noShrink {
+    flex-shrink: 0;
+}
+
 .textOverflow {
     max-width: 100%;
     white-space: nowrap;
@@ -14,6 +18,7 @@
 }
 
 .twoRowsOverflow {
+    max-width: 100%;
     display: -webkit-box;
     white-space: initial;
     word-break: break-word;
@@ -23,21 +28,30 @@
     overflow: hidden;
 
     @media (min-width: 768px) {
+        display: block;
+        white-space: nowrap;
+        word-break: normal;
         -webkit-line-clamp: none;
     }
 }
 
 .scrollable {
+    scrollbar-width: thin;
+    scrollbar-color: var(--default-gray-icons) transparent;
+
     &::-webkit-scrollbar {
         -webkit-appearance: none;
         width: 6px;
-        background: var(--light-gray);
-        border-radius: 8px;
+        background: transparent;
+    }
+
+    &::-webkit-scrollbar-track {
+        background-color: transparent;
     }
 
     &::-webkit-scrollbar-thumb {
-        border-radius: 8px;
-        background: var(--middle-gray);
+        border-radius: 10px;
+        background-color: var(--default-gray-icons);
     }
 }
 

@@ -3,6 +3,7 @@ package home
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"net/netip"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/AdguardTeam/AdGuardHome/internal/agh"
@@ -68,7 +70,7 @@ type webAPIConfig struct {
 
 	// tlsManager contains the current configuration and state of TLS
 	// encryption.  It must not be nil.
-	tlsManager *tlsManager
+	tlsManager aghtls.Manager
 
 	// auth stores web user information and handles authentication.  It must not
 	// be nil.
@@ -222,15 +224,7 @@ type webAPI struct {
 	baseLogger *slog.Logger
 
 	// tlsManager manages the TLS state.  It must not be nil.
-	//
-	// TODO(m.kazantsev):  Replace with [aghtls.Manager] once
-	// [aghtls.TLSConfigProvider] is merged with it.
-	tlsManager service.Interface
-
-	// tlsConfProvider is used to provide the TLS configuration.
-	//
-	// TODO(m.kazantsev):  Merge with [aghtls.Manager].
-	tlsConfProvider aghtls.TLSConfigProvider
+	tlsManager aghtls.Manager
 
 	// auth stores web user information and handles authentication.
 	auth *auth
@@ -238,11 +232,16 @@ type webAPI struct {
 	// hostsContainer is used for DNS initialization on updates.
 	hostsContainer *aghnet.HostsContainer
 
-	// httpsServer is the server that handles HTTPS traffic.  If it is not nil,
-	// [Web.http3Server] must also not be nil.
+	// httpsServer is the server that handles HTTPS traffic.  It must not be
+	// nil.
+	httpsServer *httpsServer
+
+	// dohSrv is the DNS-over-HTTPS server, the routes of which are served by
+	// the handlers returned by [webAPI.wrapMux] in front of the authentication
+	// middleware.
 	//
-	// TODO(d.kolyshev):  Make it a pointer.
-	httpsServer httpsServer
+	// TODO(d.kolyshev): Remove after DoH is served on a separate address.
+	dohSrv atomic.Pointer[doHServer]
 
 	// pidFilePath is used for cleanup.
 	pidFilePath string
@@ -259,18 +258,17 @@ func newWebAPI(ctx context.Context, conf *webAPIConfig) (w *webAPI) {
 	conf.logger.InfoContext(ctx, "initializing")
 
 	w = &webAPI{
-		conf:            conf,
-		confModifier:    conf.confModifier,
-		httpReg:         conf.httpReg,
-		cmdCons:         conf.CommandConstructor,
-		logger:          conf.logger,
-		baseLogger:      conf.baseLogger,
-		tlsManager:      conf.tlsManager,
-		tlsConfProvider: conf.tlsManager,
-		auth:            conf.auth,
-		pidFilePath:     conf.pidFilePath,
-		startTime:       time.Now(),
-		hostsContainer:  conf.hostsContainer,
+		conf:           conf,
+		confModifier:   conf.confModifier,
+		cmdCons:        conf.CommandConstructor,
+		httpReg:        conf.httpReg,
+		logger:         conf.logger,
+		baseLogger:     conf.baseLogger,
+		tlsManager:     conf.tlsManager,
+		auth:           conf.auth,
+		hostsContainer: conf.hostsContainer,
+		pidFilePath:    conf.pidFilePath,
+		startTime:      time.Now(),
 	}
 
 	clientFS := http.FileServer(http.FS(conf.clientFS))
@@ -304,24 +302,30 @@ func newWebAPI(ctx context.Context, conf *webAPIConfig) (w *webAPI) {
 		w.registerControlHandlers()
 	}
 
-	w.httpsServer.logger = conf.baseLogger.With(slogutil.KeyPrefix, "https_server")
-	w.httpsServer.mu = &sync.Mutex{}
-	w.httpsServer.reconfigured = make(chan unit, 1)
+	w.httpsServer = &httpsServer{
+		logger:       conf.baseLogger.With(slogutil.KeyPrefix, "https_server"),
+		mu:           &sync.Mutex{},
+		reconfigured: make(chan unit, 1),
+	}
 
 	return w
 }
 
 // tlsConfigChanged updates the TLS configuration and restarts the HTTPS server
-// if necessary.  tlsConf must not be nil.
-func (web *webAPI) tlsConfigChanged(ctx context.Context, tlsConf *aghtls.ExtendedTLSConfig) {
+// if necessary.
+func (web *webAPI) tlsConfigChanged(ctx context.Context) {
 	defer slogutil.RecoverAndExit(ctx, web.logger, osutil.ExitCodeFailure)
 
 	web.logger.DebugContext(ctx, "applying new tls configuration")
 
-	enabled := tlsConf.Enabled &&
-		tlsConf.PortHTTPS != 0 &&
-		len(tlsConf.PrivateKeyData) != 0 &&
-		len(tlsConf.CertificateChainData) != 0
+	extTLSConf := web.tlsManager.ExtendedTLSConfig()
+	tlsConf := web.tlsManager.TLSConfig()
+
+	enabled := tlsConf != nil &&
+		extTLSConf.Enabled &&
+		extTLSConf.PortHTTPS != 0 &&
+		len(extTLSConf.PrivateKeyData) != 0 &&
+		len(extTLSConf.CertificateChainData) != 0
 
 	// TODO(d.kolyshev):  Consider protecting server with mu.
 	if web.httpsServer.server != nil {
@@ -356,7 +360,7 @@ func (web *webAPI) start(ctx context.Context) {
 		// Apply the initial TLS configuration.  The background context is used
 		// because tlsConfigChanged wraps context with timeout on its own and shuts
 		// down the server, which handles current request.
-		web.tlsConfigChanged(context.Background(), web.tlsConfProvider.ExtendedTLSConfig())
+		web.tlsConfigChanged(context.Background())
 
 		// For https, we have a separate goroutine loop.
 		web.tlsServerLoop(ctx)
@@ -405,15 +409,47 @@ func (web *webAPI) start(ctx context.Context) {
 	}
 }
 
+// setDoHServer sets the DoH server, the routes of which are served by the
+// handlers returned by [webAPI.wrapMux], including the ones created before this
+// call.  srv must not be nil.
+func (web *webAPI) setDoHServer(srv *doHServer) {
+	web.dohSrv.Store(srv)
+}
+
 // wrapMux wraps mux with common middlewares.  l must not be nil.
 func (web *webAPI) wrapMux(l *slog.Logger) (h http.Handler) {
-	h = httputil.Wrap(web.conf.mux, httputil.MiddlewareFunc(limitRequestBody))
+	h = httputil.Wrap(
+		web.conf.mux,
+		httputil.MiddlewareFunc(limitRequestBody),
+		httputil.MiddlewareFunc(noCacheHeaders),
+	)
 
 	// TODO(a.garipov):  Remove other logs like this in other code.
 	logMw := httputil.NewLogMiddleware(l, slog.LevelDebug)
 	h = logMw.Wrap(h)
 
-	return web.auth.middleware().Wrap(h)
+	h = web.auth.middleware().Wrap(h)
+
+	// TODO(d.kolyshev):  Remove after DoH is served on a separate address.
+	h = web.wrapDoHRoutes(h)
+
+	return h
+}
+
+// wrapDoHRoutes returns a handler that serves the DoH routes in front of the
+// authentication middleware as soon as the DoH server is set via
+// [webAPI.setDoHServer], including for the handlers created before that, and
+// passes all other requests to h.  h must not be nil.
+func (web *webAPI) wrapDoHRoutes(h http.Handler) (wrapped http.Handler) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		srv := web.dohSrv.Load()
+
+		if srv != nil && srv.tryServe(w, r) {
+			return
+		}
+
+		h.ServeHTTP(w, r)
+	})
 }
 
 // close gracefully shuts down the HTTP servers.
@@ -479,14 +515,14 @@ func (web *webAPI) serveTLS(ctx context.Context) (next bool) {
 	web.httpsServer.server = &http.Server{
 		Addr:              addr,
 		Handler:           hdlr,
-		TLSConfig:         web.tlsConfProvider.TLSConfig(),
+		TLSConfig:         web.tlsManager.TLSConfig(),
 		ReadTimeout:       web.conf.ReadTimeout,
 		ReadHeaderTimeout: web.conf.ReadHeaderTimeout,
 		WriteTimeout:      web.conf.WriteTimeout,
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
 
-	extTLSConf := web.tlsConfProvider.ExtendedTLSConfig()
+	extTLSConf := web.tlsManager.ExtendedTLSConfig()
 	printHTTPSAddresses(ctx, web.logger, extTLSConf)
 
 	if web.conf.serveHTTP3 {
@@ -515,7 +551,7 @@ func (web *webAPI) mustStartHTTP3(ctx context.Context, address string) {
 		// TODO(a.garipov): See if there is a way to use the error log as
 		// well as timeouts here.
 		Addr:      address,
-		TLSConfig: web.tlsConfProvider.TLSConfig(),
+		TLSConfig: web.tlsManager.TLSConfig(),
 		Handler:   hdlr,
 	}
 
@@ -529,6 +565,7 @@ func (web *webAPI) mustStartHTTP3(ctx context.Context, address string) {
 }
 
 // startPprof launches the debug and profiling server on the provided port.
+// baseLogger must not be nil.
 func startPprof(baseLogger *slog.Logger, port uint16) {
 	addr := netip.AddrPortFrom(netutil.IPv4Localhost(), port)
 
@@ -554,17 +591,15 @@ func startPprof(baseLogger *slog.Logger, port uint16) {
 
 // handleTLSStatus is the handler for the GET /control/tls/status HTTP API.
 func (web *webAPI) handleTLSStatus(w http.ResponseWriter, r *http.Request) {
-	tlsConf := web.tlsConfProvider.ExtendedTLSConfig()
+	tlsConf := web.tlsManager.ExtendedTLSConfig()
 
 	data := &tlsConfig{
-		tlsConfigSettingsExt: tlsConfigSettingsExt{
-			tlsConfigSettings: confToTLSSettings(tlsConf),
-			ServePlainDNS:     aghalg.BoolToNullBool(tlsConf.ServePlainDNS),
-		},
-		tlsConfigStatus: tlsConfigStatusFromConf(&tlsConf.Status),
+		tlsConfigSettings: confToTLSSettings(tlsConf),
+		ServePlainDNS:     aghalg.BoolToNullBool(tlsConf.ServePlainDNS),
+		tlsConfigStatus:   tlsConfigStatusFromConf(&tlsConf.Status),
 	}
 
-	web.marshalTLS(r.Context(), w, r, data)
+	marshalTLS(r.Context(), web.logger, w, r, data)
 }
 
 // handleTLSValidate is the handler for the POST /control/tls/validate HTTP API.
@@ -582,7 +617,7 @@ func (web *webAPI) handleTLSValidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	extTLSConf := web.tlsConfProvider.ExtendedTLSConfig()
+	extTLSConf := web.tlsManager.ExtendedTLSConfig()
 
 	if setts.PrivateKeySaved {
 		setts.PrivateKey = extTLSConf.PrivateKey
@@ -599,23 +634,24 @@ func (web *webAPI) handleTLSValidate(w http.ResponseWriter, r *http.Request) {
 	// Skip the error check, since we are only interested in the value of
 	// status.WarningValidation.
 	status := &aghtls.TLSConfigStatus{}
-	_ = loadTLSConfig(
+	_ = aghtls.LoadTLSConfig(
 		ctx,
 		web.logger,
-		web.tlsConfProvider,
+		web.tlsManager,
 		confFromTLSSettings(&setts.tlsConfigSettings),
 		status,
 	)
 	resp := &tlsConfig{
-		tlsConfigSettingsExt: setts,
+		tlsConfigSettingsExt: *setts,
 		tlsConfigStatus:      tlsConfigStatusFromConf(status),
 	}
 
-	web.marshalTLS(ctx, w, r, resp)
+	marshalTLS(ctx, web.logger, w, r, resp)
 }
 
-// validateTLSSettings returns error if the setts are not valid.
-func (web *webAPI) validateTLSSettings(setts tlsConfigSettingsExt) (err error) {
+// validateTLSSettings returns error if the setts are not valid.  setts must not
+// be nil.
+func (web *webAPI) validateTLSSettings(setts *tlsConfigSettingsExt) (err error) {
 	if !setts.Enabled {
 		if setts.ServePlainDNS == aghalg.NBFalse {
 			// TODO(a.garipov): Support full disabling of all DNS.
@@ -636,7 +672,7 @@ func (web *webAPI) validateTLSSettings(setts tlsConfigSettingsExt) (err error) {
 		config.Lock()
 		defer config.Unlock()
 
-		tlsConf = config.TLS
+		tlsConf = confToTLSSettings(web.tlsManager.ExtendedTLSConfig())
 		webAPIAddr = config.HTTPConfig.Address.Addr()
 		webAPIPort = config.HTTPConfig.Address.Port()
 		plainDNSPort = config.DNS.Port
@@ -649,6 +685,7 @@ func (web *webAPI) validateTLSSettings(setts tlsConfigSettingsExt) (err error) {
 		tcpPort(setts.PortDNSCrypt),
 		udpPort(plainDNSPort),
 		udpPort(setts.PortDNSOverQUIC),
+		web.conf.serveHTTP3,
 	)
 	if err != nil {
 		// Don't wrap the error because it's informative enough as is.
@@ -656,22 +693,41 @@ func (web *webAPI) validateTLSSettings(setts tlsConfigSettingsExt) (err error) {
 	}
 
 	// Don't wrap the error because it's informative enough as is.
-	return checkPortAvailability(tlsConf, setts.tlsConfigSettings, webAPIAddr)
+	return checkPortAvailability(tlsConf, setts.tlsConfigSettings, webAPIAddr, web.conf.serveHTTP3)
 }
 
-// checkPortAvailability checks [tlsConfigSettings.PortHTTPS],
-// [tlsConfigSettings.PortDNSOverTLS], and
-// [tlsConfigSettings.PortDNSOverQUIC] are available for use.  It checks
+// bindingCheck represents a single network protocol binding check.
+type bindingCheck struct {
+	network  string
+	proto    string
+	currPort uint16
+	newPort  uint16
+}
+
+// checkPortAvailability checks ports, which are available for use.  It checks
 // the current configuration and, if needed, attempts to bind to the port.  The
 // function returns human-readable error messages for the frontend.  This is
-// best-effort check to prevent an "address already in use" error.
+// best-effort check to prevent an "address already in use" error.  The checked
+// ports are:
 //
-// TODO(a.garipov): Adapt for HTTP/3.
+//   - [tlsConfigSettings.PortHTTPS] (TCP)
+//   - [tlsConfigSettings.PortHTTPS] (UDP, if HTTP/3 is enabled)
+//   - [tlsConfigSettings.PortDNSOverTLS]
+//   - [tlsConfigSettings.PortDNSOverQUIC]
+//
+// TODO(m.kazantsev):  Base the port check on the ports actually held by the
+// DoH, DoT, and DoQ servers instead of comparing the current and the new
+// settings.
 func checkPortAvailability(
 	currConf tlsConfigSettings,
 	newConf tlsConfigSettings,
 	addr netip.Addr,
+	useHTTP3 bool,
 ) (err error) {
+	if !newConf.Enabled {
+		return nil
+	}
+
 	const (
 		networkTCP = "tcp"
 		networkUDP = "udp"
@@ -681,12 +737,7 @@ func checkPortAvailability(
 		protoDoQ   = "DNS-over-QUIC"
 	)
 
-	needBindingCheck := []struct {
-		network  string
-		proto    string
-		currPort uint16
-		newPort  uint16
-	}{{
+	needBindingCheck := []bindingCheck{{
 		network:  networkTCP,
 		proto:    protoHTTPS,
 		currPort: currConf.PortHTTPS,
@@ -703,10 +754,23 @@ func checkPortAvailability(
 		newPort:  newConf.PortDNSOverQUIC,
 	}}
 
+	if useHTTP3 {
+		http3Check := bindingCheck{
+			network:  networkUDP,
+			proto:    protoHTTPS,
+			currPort: currConf.PortHTTPS,
+			newPort:  newConf.PortHTTPS,
+		}
+
+		needBindingCheck = append(needBindingCheck, http3Check)
+	}
+
 	var errs []error
+	enabledChanged := newConf.Enabled != currConf.Enabled
 	for _, v := range needBindingCheck {
 		port := v.newPort
-		if v.currPort == port {
+
+		if v.currPort == port && !enabledChanged {
 			continue
 		}
 
@@ -723,16 +787,17 @@ func checkPortAvailability(
 // validatePorts validates the uniqueness of TCP and UDP ports for AdGuard Home
 // DNS protocols.
 func validatePorts(
-	bindPort, dohPort, dotPort, dnscryptTCPPort tcpPort,
+	bindPort, dohPort, dotPort, dnscryptPort tcpPort,
 	dnsPort, doqPort udpPort,
+	serveHTTP3 bool,
 ) (err error) {
 	tcpPorts := aghalg.UniqChecker[tcpPort]{}
 	addPorts(
 		tcpPorts,
 		bindPort,
-		dohPort,
+		tcpPort(dohPort),
 		dotPort,
-		dnscryptTCPPort,
+		dnscryptPort,
 		tcpPort(dnsPort),
 	)
 
@@ -742,7 +807,11 @@ func validatePorts(
 	}
 
 	udpPorts := aghalg.UniqChecker[udpPort]{}
-	addPorts(udpPorts, dnsPort, doqPort)
+	addPorts(udpPorts, dnsPort, doqPort, udpPort(dnscryptPort))
+
+	if serveHTTP3 {
+		addPorts(udpPorts, udpPort(dohPort))
+	}
 
 	err = udpPorts.Validate()
 	if err != nil {
@@ -781,7 +850,7 @@ func (web *webAPI) handleTLSConfigure(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	extTLSConf := web.tlsConfProvider.ExtendedTLSConfig()
+	extTLSConf := web.tlsManager.ExtendedTLSConfig()
 
 	if req.PrivateKeySaved {
 		req.PrivateKey = extTLSConf.PrivateKey
@@ -789,7 +858,8 @@ func (web *webAPI) handleTLSConfigure(w http.ResponseWriter, r *http.Request) {
 
 	req.StrictSNICheck = extTLSConf.StrictSNICheck
 
-	if err = web.validateTLSSettings(req); err != nil {
+	err = web.validateTLSSettings(req)
+	if err != nil {
 		aghhttp.ErrorAndLog(ctx, web.logger, r, w, http.StatusBadRequest, "%s", err)
 
 		return
@@ -797,14 +867,14 @@ func (web *webAPI) handleTLSConfigure(w http.ResponseWriter, r *http.Request) {
 
 	status := &aghtls.TLSConfigStatus{}
 	conf := confFromTLSSettings(&req.tlsConfigSettings)
-	err = loadTLSConfig(ctx, web.logger, web.tlsConfProvider, conf, status)
+	err = aghtls.LoadTLSConfig(ctx, web.logger, web.tlsManager, conf, status)
 	if err != nil {
 		resp := &tlsConfig{
-			tlsConfigSettingsExt: req,
+			tlsConfigSettingsExt: *req,
 			tlsConfigStatus:      tlsConfigStatusFromConf(status),
 		}
 
-		web.marshalTLS(ctx, w, r, resp)
+		marshalTLS(ctx, web.logger, w, r, resp)
 
 		return
 	}
@@ -812,12 +882,14 @@ func (web *webAPI) handleTLSConfigure(w http.ResponseWriter, r *http.Request) {
 	newTLSConf := conf
 	newTLSConf.Status = *status
 
-	restartHTTPS, err = web.tlsConfProvider.SetExtendedTLSConfig(ctx, req.ServePlainDNS, newTLSConf)
+	restartHTTPS, err = web.tlsManager.SetExtendedTLSConfig(ctx, req.ServePlainDNS, newTLSConf)
 	if err != nil {
 		aghhttp.ErrorAndLog(ctx, web.logger, r, w, http.StatusInternalServerError, "%s", err)
 
 		return
 	}
+
+	setServePlainDNS(req)
 
 	err = web.reconfigureDNSServer(ctx)
 	if err != nil {
@@ -829,7 +901,7 @@ func (web *webAPI) handleTLSConfigure(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := &tlsConfig{
-		tlsConfigSettingsExt: req,
+		tlsConfigSettingsExt: *req,
 		tlsConfigStatus:      tlsConfigStatusFromConf(status),
 	}
 
@@ -841,8 +913,22 @@ func (web *webAPI) handleTLSConfigure(w http.ResponseWriter, r *http.Request) {
 		// request.  It is also should be done in a separate goroutine due to the
 		// same reason.
 		if restartHTTPS {
-			go web.tlsConfigChanged(context.Background(), newTLSConf)
+			go web.tlsConfigChanged(context.Background())
 		}
+	}()
+}
+
+// setServePlainDNS updates the ServePlainDNS field of [config.DNS].
+func setServePlainDNS(req *tlsConfigSettingsExt) {
+	if req.ServePlainDNS == aghalg.NBNull {
+		return
+	}
+
+	func() {
+		config.Lock()
+		defer config.Unlock()
+
+		config.DNS.ServePlainDNS = req.ServePlainDNS == aghalg.NBTrue
 	}()
 }
 
@@ -854,7 +940,7 @@ func (web *webAPI) writeTLSConfigureResponse(
 	r *http.Request,
 	resp *tlsConfig,
 ) {
-	web.marshalTLS(ctx, w, r, resp)
+	marshalTLS(ctx, web.logger, w, r, resp)
 
 	rc := http.NewResponseController(w)
 	err := rc.Flush()
@@ -869,7 +955,8 @@ func (web *webAPI) reconfigureDNSServer(ctx context.Context) (err error) {
 		&config.DNS,
 		config.Clients.Sources,
 		config.HTTPConfig.DoH,
-		web.tlsConfProvider,
+		web.tlsManager,
+		config.HTTPConfig.Address,
 		web.httpReg,
 		globalContext.clients.storage,
 		web.confModifier,
@@ -888,8 +975,9 @@ func (web *webAPI) reconfigureDNSServer(ctx context.Context) (err error) {
 
 // marshalTLS encodes sensitive fields and writes data as JSON.  All arguments
 // must not be nil.  data is modified in place.
-func (web *webAPI) marshalTLS(
+func marshalTLS(
 	ctx context.Context,
+	logger *slog.Logger,
 	w http.ResponseWriter,
 	r *http.Request,
 	data *tlsConfig,
@@ -904,7 +992,51 @@ func (web *webAPI) marshalTLS(
 		data.PrivateKey = ""
 	}
 
-	aghhttp.WriteJSONResponseOK(ctx, web.logger, w, r, *data)
+	aghhttp.WriteJSONResponseOK(ctx, logger, w, r, *data)
+}
+
+// unmarshalTLS handles base64-encoded certificates transparently.  r must not
+// be nil.
+func unmarshalTLS(r *http.Request) (data *tlsConfigSettingsExt, err error) {
+	data = &tlsConfigSettingsExt{}
+
+	err = json.NewDecoder(r.Body).Decode(&data)
+	if err != nil {
+		return data, fmt.Errorf("failed to parse new tls config json: %w", err)
+	}
+
+	if data == nil {
+		return &tlsConfigSettingsExt{}, nil
+	}
+
+	if data.tlsConfigSettings.CertificateChain != "" {
+		var cert []byte
+		cert, err = base64.StdEncoding.DecodeString(data.tlsConfigSettings.CertificateChain)
+		if err != nil {
+			return data, fmt.Errorf("failed to base64-decode certificate chain: %w", err)
+		}
+
+		data.tlsConfigSettings.CertificateChain = string(cert)
+		if data.tlsConfigSettings.CertificatePath != "" {
+			return data, errors.Error("certificate data and file can't be set together")
+		}
+	}
+
+	if data.tlsConfigSettings.PrivateKey == "" {
+		return data, nil
+	}
+
+	key, err := base64.StdEncoding.DecodeString(data.tlsConfigSettings.PrivateKey)
+	if err != nil {
+		return data, fmt.Errorf("failed to base64-decode private key: %w", err)
+	}
+
+	data.tlsConfigSettings.PrivateKey = string(key)
+	if data.tlsConfigSettings.PrivateKeyPath != "" {
+		return data, errors.Error("private key data and file can't be set together")
+	}
+
+	return data, nil
 }
 
 // type check

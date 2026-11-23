@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest';
-import { render, screen } from '@solidjs/testing-library';
+import { render, screen, waitFor } from '@solidjs/testing-library';
 
 // jsdom has no matchMedia; App's theme effect and some hooks depend on it.
 beforeAll(() => {
@@ -23,6 +23,7 @@ beforeAll(() => {
 vi.mock('panel/stores/dashboard', () => ({
     dashboardState: {
         processing: false,
+        statusFailed: false,
         isCoreRunning: true,
         language: 'en',
         theme: undefined,
@@ -30,6 +31,7 @@ vi.mock('panel/stores/dashboard', () => ({
     },
     getDnsStatus: vi.fn(),
     getTimerStatus: vi.fn(),
+    stopStatusChecks: vi.fn(),
 }));
 
 vi.mock('panel/common/ui/Header', () => ({
@@ -51,6 +53,13 @@ vi.mock('panel/components/Toasts', () => ({ Toasts: (): null => null }));
 vi.mock('panel/components/Dashboard', () => ({
     Dashboard: () => <div data-testid="route-dashboard" />,
 }));
+vi.mock('panel/components/Stats', () => ({
+    TopClientsPage: () => <div data-testid="route-top-clients" />,
+    TopQueriedDomainsPage: () => <div data-testid="route-top-queried-domains" />,
+    TopBlockedDomainsPage: () => <div data-testid="route-top-blocked-domains" />,
+    TopUpstreamsPage: () => <div data-testid="route-top-upstreams" />,
+    UpstreamAvgTimePage: () => <div data-testid="route-upstream-avg-time" />,
+}));
 
 import App from '../components/App';
 
@@ -61,6 +70,18 @@ describe('App routing', () => {
         render(() => <App />);
 
         expect(await screen.findByTestId('route-dashboard')).toBeInTheDocument();
+    });
+
+    it.each([
+        ['#/top_clients', 'route-top-clients'],
+        ['#/top_queried_domains', 'route-top-queried-domains'],
+        ['#/top_blocked_domains', 'route-top-blocked-domains'],
+        ['#/top_upstreams', 'route-top-upstreams'],
+        ['#/upstream_avg_time', 'route-upstream-avg-time'],
+    ])('renders the stats page for %s', async (hash, testid) => {
+        window.location.hash = hash;
+        render(() => <App />);
+        await waitFor(() => expect(screen.getByTestId(testid)).toBeInTheDocument());
     });
 
     it('mounts Banners between Header and the wrapper in the main entry', async () => {

@@ -7,12 +7,11 @@
     color: var(--default-link);
     transition: color var(--t2);
     text-decoration: underline;
-    -webkit-tap-highlight-color: transparent;
 
     &:disabled,
     &.disabled {
         cursor: not-allowed;
-        color: var(--disabled-main-button);
+        color: var(--disabled-link);
         outline: 0;
     }
 
@@ -43,5 +42,14 @@
 
     &.noDecoration {
         text-decoration: none;
+    }
+
+    &.hoverDecoration {
+        text-decoration: none;
+
+        &:hover,
+        &:focus {
+            text-decoration: underline;
+        }
     }
 }

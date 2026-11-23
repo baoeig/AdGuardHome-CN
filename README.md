@@ -1,3 +1,7 @@
+<!-- TODO(a.garipov):  Update the image and add alt text. -->
+
+<!-- markdownlint-disable first-line-h1 no-alt-text no-inline-html -->
+
 &nbsp;
 <p align="center">
   <picture>
@@ -38,6 +42,8 @@
   <img src="https://cdn.adtidy.org/public/Adguard/Common/adguard_home.gif" width="800"/>
 </p>
 <hr/>
+
+<!-- markdownlint-enable first-line-h1 no-alt-text no-inline-html -->
 
 AdGuard Home is a network-wide software for blocking ads and tracking. After you set it up, it'll cover ALL your home devices, and you don't need any client-side software for that.
 
@@ -242,10 +248,10 @@ make GOOS='linux' GOARCH='arm64'
 
 #### <a href="#preparing-releases" id="preparing-releases" name="preparing-releases">Preparing releases</a>
 
-You'll need [`snapcraft`] to prepare a release build. Once installed, run the following command:
+Use both targets to create the Linux amd64 release.
 
 ```sh
-make build-release CHANNEL='...' VERSION='...'
+make -j1 SHELL=bash CHANNEL='...' VERSION='...' build-release pack-release
 ```
 
 See the [`build-release` target documentation][targ-release].
@@ -284,7 +290,6 @@ When you need to debug the frontend without recompiling the production version e
 
 3. Now any changes you make in the `./client/` directory should be recompiled and become available on the web UI. Make sure that you disable the browser cache to make sure that you actually get the recompiled version.
 
-[`snapcraft`]:  https://snapcraft.io/
 [buildx]:       https://docs.docker.com/buildx/working-with-buildx/
 [src-makefile]: https://github.com/baoeig/AdGuardHome-CN/blob/master/Makefile
 [targ-docker]:  https://github.com/baoeig/AdGuardHome-CN/tree/master/scripts#build-dockersh-build-a-multi-architecture-docker-image
@@ -295,13 +300,19 @@ When you need to debug the frontend without recompiling the production version e
 AdGuard Home uses [Playwright](https://playwright.dev) for E2E testing. Tests are located in `tests/e2e`.
 
 **Running Tests:**
-- `npm run test:e2e` – run all tests (headless).
-- `npm run test:e2e:interactive` – run tests interactively.
-- `npm run test:e2e:debug` – run tests in debug mode.
-- `npm run test:e2e:codegen` – generate new test code.
+
+- `npm run test:e2e`: run all tests (headless).
+
+- `npm run test:e2e:interactive`: run tests interactively.
+
+- `npm run test:e2e:debug`: run tests in debug mode.
+
+- `npm run test:e2e:codegen`: generate new test code.
 
 **Setup:**
+
 1. Run `npm install` to install dependencies.
+
 2. Run `npx playwright install` to set up required browsers.
 
 > **Warning:** Playwright will download and install its own browser binaries for testing, which may differ from the browsers installed on your system.
@@ -393,6 +404,8 @@ Please note that these projects are not affiliated with AdGuard, but are made by
 - [Zabbix Template for AdGuard Home](https://github.com/diasdmhub/AdGuard_Home_Zabbix_Template) by [@diasdmhub](https://github.com/diasdmhub).
 
 - [Chocolatey package](https://community.chocolatey.org/packages/adguardhome/) by [niks255](https://community.chocolatey.org/profiles/niks255).
+
+- [ZimaOS App Store listing](https://www.zimaspace.com/zimaos/app-store/app/org.icewhale.adguardhome) by [ZimaOS Team](https://www.zimaspace.com/zimaos).
 
 ## <a href="#acknowledgments" id="acknowledgments" name="acknowledgments">Acknowledgments</a>
 

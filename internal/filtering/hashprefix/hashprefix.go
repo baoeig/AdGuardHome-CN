@@ -12,12 +12,14 @@ import (
 	"time"
 
 	"github.com/AdguardTeam/dnsproxy/upstream"
-	"github.com/AdguardTeam/golibs/cache"
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
 	"github.com/AdguardTeam/golibs/netutil"
 	"github.com/AdguardTeam/golibs/stringutil"
 	"github.com/miekg/dns"
 	"golang.org/x/net/publicsuffix"
+
+	//lint:ignore SA1019 TODO(f.setrakov): Use bytecache instead.
+	"github.com/AdguardTeam/golibs/cache"
 )
 
 const (
@@ -122,7 +124,7 @@ func (c *Checker) Check(host string) (ok bool, err error) {
 	l.DebugContext(ctx, "checking", "question", question)
 	req := (&dns.Msg{}).SetQuestion(question, dns.TypeTXT)
 
-	resp, err := c.upstream.Exchange(req)
+	resp, err := c.upstream.Exchange(ctx, req)
 	if err != nil {
 		return false, fmt.Errorf("getting hashes: %w", err)
 	}

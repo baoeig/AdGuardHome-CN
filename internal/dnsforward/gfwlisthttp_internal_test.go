@@ -6,10 +6,38 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/AdguardTeam/AdGuardHome/internal/configmgr"
+	"github.com/AdguardTeam/golibs/timeutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestServer_WriteDiskConfig_gfwList(t *testing.T) {
+	conf := &GFWListConfig{
+		Enabled:        true,
+		URL:            "https://example.org/gfwlist.txt",
+		UpstreamDNS:    []string{"1.1.1.1"},
+		UpdateInterval: timeutil.Duration(24 * time.Hour),
+		CustomDomains:  []string{"example.com"},
+	}
+	s := &Server{conf: ServerConfig{Config: Config{
+		EDNSClientSubnet: &EDNSClientSubnet{},
+		GFWList:          conf,
+	}}}
+	disk := &configmgr.DNSConfig{}
+	s.WriteDiskConfig(disk)
+
+	conf.CustomDomains[0] = "example.net"
+	assert.Equal(t, &configmgr.GFWListConfig{
+		Enabled:        true,
+		URL:            "https://example.org/gfwlist.txt",
+		UpstreamDNS:    []string{"1.1.1.1"},
+		UpdateInterval: timeutil.Duration(24 * time.Hour),
+		CustomDomains:  []string{"example.com"},
+	}, disk.GFWList)
+}
 
 func TestHandleGFWListStatusPagination(t *testing.T) {
 	conf := &GFWListConfig{

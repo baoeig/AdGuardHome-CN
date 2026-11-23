@@ -20,12 +20,12 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26.5'
+          go-version: '1.27.4'
 
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Set up Go modules cache
         uses: actions/cache@v4
@@ -35,7 +35,9 @@ jobs:
           restore-keys: ${{ runner.os }}-go-
 
       - name: Build Release
-        run: make SIGN=0 VERBOSE=1 CHANNEL="release" VERSION="${GITHUB_REF_NAME}" build-release
+        run: >-
+          make -j1 SHELL=bash ARCH=amd64 OS=linux SIGN=0 VERBOSE=1
+          CHANNEL=release VERSION="${GITHUB_REF_NAME}" build-release pack-release
         env:
           GO111MODULE: on
 

@@ -1,5 +1,5 @@
 .header {
-    box-shadow: 4px 4px 8px 0 rgba(0, 0, 0, 0.1);
+    box-shadow: var(--small-box-shadow);
 }
 
 .headerContent {
@@ -47,5 +47,45 @@
     @media screen and (min-width: 1024px) {
         order: 0;
         padding: 0 0 0 16px;
+    }
+}
+
+.auth {
+    box-shadow: none;
+    border-bottom: 1px solid var(--default-cards-background);
+
+    .headerContent {
+        height: 48px;
+        flex-wrap: nowrap;
+        row-gap: 0;
+        padding: 0 12px;
+    }
+
+    .logoWrap {
+        order: 0;
+        padding: 0;
+    }
+
+    .languageWrap {
+        order: 0;
+        margin-left: auto;
+        min-width: 0;
+    }
+
+    @media screen and (min-width: 768px) {
+        box-shadow: var(--small-box-shadow);
+
+        .headerContent {
+            height: 80px;
+            padding: 0;
+        }
+
+        .logoWrap {
+            padding: 0 0 0 16px;
+        }
+
+        .languageWrap {
+            min-width: 90px;
+        }
     }
 }

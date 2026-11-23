@@ -5,6 +5,7 @@ import { clientsUpdate, clientsAdd } from 'panel/api/generated';
 import intl from 'panel/common/intl';
 import { validateIdentifier, validateCacheSize } from 'panel/helpers/validators';
 import { DEFAULT_DNS_CACHE_SIZE } from 'panel/helpers/constants';
+import { DAYS_OF_WEEK } from 'panel/helpers/schedule';
 import { addErrorToast, addSuccessToast } from './toasts';
 import { getClients, dashboardState } from './dashboard';
 
@@ -81,7 +82,7 @@ export const clearClientForm = () => {
     setState(getInitialClientFormState());
 };
 
-export const setFormErrors = (errors: Record<string, string | string[]>) => {
+export const setFormErrors = (errors: Record<string, string | (string | undefined)[]>) => {
     setState('formErrors', errors);
 };
 
@@ -91,6 +92,29 @@ export const clearFormErrors = () => {
 
 export const setProcessingSave = (value: boolean) => {
     setState('processingSave', value);
+};
+
+/**
+ * Converts an API schedule into the form schedule, preserving the configured
+ * day ranges. The API model allows partial ranges, while the form requires both
+ * bounds, so incomplete entries are dropped.
+ */
+const buildFormSchedule = (
+    schedule: Client['blocked_services_schedule'],
+): ClientFormState['blocked_services_schedule'] => {
+    const result: ClientFormState['blocked_services_schedule'] = {
+        time_zone:
+            schedule?.time_zone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+    };
+
+    DAYS_OF_WEEK.forEach((day) => {
+        const range = schedule?.[day];
+        if (range && typeof range.start === 'number' && typeof range.end === 'number') {
+            result[day] = { start: range.start, end: range.end };
+        }
+    });
+
+    return result;
 };
 
 export const buildFormPayload = (client: Client): Partial<ClientFormState> => ({
@@ -115,11 +139,7 @@ export const buildFormPayload = (client: Client): Partial<ClientFormState> => ({
     ignore_statistics: client.ignore_statistics || false,
     blocked_services: client.blocked_services || [],
     use_global_blocked_services: client.use_global_blocked_services || false,
-    blocked_services_schedule: {
-        time_zone:
-            client.blocked_services_schedule?.time_zone ??
-            Intl.DateTimeFormat().resolvedOptions().timeZone,
-    },
+    blocked_services_schedule: buildFormSchedule(client.blocked_services_schedule),
     upstreams: (client.upstreams || []).join('\n'),
     upstreams_cache_enabled: client.upstreams_cache_enabled || false,
     upstreams_cache_size: client.upstreams_cache_size || DEFAULT_DNS_CACHE_SIZE,
@@ -130,7 +150,7 @@ export const buildClientConfig = (form: ClientFormState) => ({
     ids: form.ids.filter((id: string) => id.trim() !== ''),
     tags: form.tags,
     use_global_settings: form.use_global_settings,
-    use_global_blocked_services: form.use_global_settings,
+    use_global_blocked_services: form.use_global_blocked_services,
     filtering_enabled: form.filtering_enabled,
     safebrowsing_enabled: form.safebrowsing_enabled,
     parental_enabled: form.parental_enabled,
@@ -143,7 +163,7 @@ export const buildClientConfig = (form: ClientFormState) => ({
         ? form.upstreams.split('\n').filter((line: string) => line.trim() !== '')
         : [],
     upstreams_cache_enabled: form.upstreams_cache_enabled,
-    upstreams_cache_size: form.upstreams_cache_size,
+    upstreams_cache_size: form.upstreams_cache_size === '' ? 0 : Number(form.upstreams_cache_size),
 });
 
 /**
@@ -161,7 +181,7 @@ export const computeExistingClientNames = (): string[] =>
         .map((c: Client) => c.name);
 
 export const saveClient = async (): Promise<boolean> => {
-    const errors: Record<string, string | string[]> = {};
+    const errors: Record<string, string | (string | undefined)[]> = {};
 
     if (!state.name.trim()) {
         errors.name = intl.getMessage('form_error_required');
@@ -182,16 +202,15 @@ export const saveClient = async (): Promise<boolean> => {
         }
         return validateIdentifier(id, state.ids, index, existingClientIds);
     });
-    const filteredErrors = idErrors.filter((e): e is string => e !== undefined);
-    if (filteredErrors.length > 0) {
-        errors.ids = filteredErrors;
+    if (idErrors.some((e) => e !== undefined)) {
+        errors.ids = idErrors;
     }
 
-    // Validate cache size when per-client cache is enabled (and not using global settings).
-    // When use_global_settings is true, upstream settings are inherited; the cache size
-    // value is still sent to the API but the backend ignores it. We skip validation to
-    // avoid false positives on stale/inherited values.
-    if (!state.use_global_settings && state.upstreams_cache_enabled) {
+    // Validate the cache size whenever the per-client cache is enabled. Upstream
+    // settings are independent of `use_global_settings`: an empty upstream list
+    // means the global servers are used, and the per-client cache only applies
+    // when the client has its own upstreams.
+    if (state.upstreams_cache_enabled) {
         const cacheErr = validateCacheSize(state.upstreams_cache_size, true);
         if (cacheErr) {
             errors.upstreams_cache_size = cacheErr;

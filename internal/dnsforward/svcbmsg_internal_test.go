@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/AdguardTeam/AdGuardHome/internal/filtering"
+	"github.com/AdguardTeam/dnsproxy/proxy"
 	"github.com/AdguardTeam/golibs/testutil"
 	"github.com/AdguardTeam/urlfilter/rules"
 	"github.com/miekg/dns"
@@ -20,15 +21,13 @@ func TestGenAnswerHTTPS_andSVCB(t *testing.T) {
 			BlockingMode: filtering.BlockingModeDefault,
 		},
 		ServerConfig{
-			TLSConf: &TLSConfig{},
-			Config: Config{
-				UpstreamMode:     UpstreamModeLoadBalance,
-				EDNSClientSubnet: &EDNSClientSubnet{Enabled: false},
-				ClientsContainer: EmptyClientsContainer{},
-			},
-			ServePlainDNS: true,
+			TLSConf:          &TLSConfig{},
+			UpstreamMode:     proxy.UpstreamModeLoadBalance,
+			EDNSClientSubnet: &EDNSClientSubnet{Enabled: false},
+			ClientsContainer: EmptyClientsContainer{},
+			ServePlainDNS:    true,
 		},
-		testTLSConfigProvider,
+		testTLSManager,
 	)
 
 	req := &dns.Msg{
@@ -102,14 +101,6 @@ func TestGenAnswerHTTPS_andSVCB(t *testing.T) {
 		svcb: dnssvcb("ech", "AAAA"),
 		want: wantsvcb(&dns.SVCBECHConfig{ECH: []byte{0, 0, 0}}),
 		name: "ech",
-	}, {
-		svcb: dnssvcb("echconfig", "AAAA"),
-		want: wantsvcb(&dns.SVCBECHConfig{ECH: []byte{0, 0, 0}}),
-		name: "ech_deprecated",
-	}, {
-		svcb: dnssvcb("echconfig", "%BAD%"),
-		want: wantsvcb(nil),
-		name: "ech_invalid",
 	}, {
 		svcb: dnssvcb("ipv4hint", "127.0.0.1"),
 		want: wantsvcb(&dns.SVCBIPv4Hint{Hint: []net.IP{ip4}}),

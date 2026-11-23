@@ -17,18 +17,13 @@ import (
 	"github.com/AdguardTeam/AdGuardHome/internal/aghhttp"
 	"github.com/AdguardTeam/AdGuardHome/internal/aghnet"
 	"github.com/AdguardTeam/AdGuardHome/internal/aghos"
+	"github.com/AdguardTeam/AdGuardHome/internal/configmgr"
 	"github.com/AdguardTeam/golibs/errors"
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
 	"github.com/AdguardTeam/golibs/timeutil"
 	"go.etcd.io/bbolt"
 	bbolterrors "go.etcd.io/bbolt/errors"
 )
-
-// checkInterval returns true if days is valid to be used as statistics
-// retention interval.  The valid values are 0, 1, 7, 30 and 90.
-func checkInterval(days uint32) (ok bool) {
-	return days == 0 || days == 1 || days == 7 || days == 30 || days == 90
-}
 
 // validateIvl returns an error if ivl is less than an hour or more than a
 // year.
@@ -98,8 +93,9 @@ type Interface interface {
 	// clients with the most number of requests.
 	TopClientsIP(limit uint) []netip.Addr
 
-	// WriteDiskConfig puts the Interface's configuration to the dc.
-	WriteDiskConfig(dc *Config)
+	// WriteDiskConfig puts the Interface's configuration to the dc.  dc must
+	// not be nil.
+	WriteDiskConfig(dc *configmgr.StatsConfig)
 
 	// ShouldCount returns true if request for the host should be counted.
 	ShouldCount(host string, qType, qClass uint16, ids []string) bool
@@ -303,13 +299,14 @@ func (s *StatsCtx) Update(e *Entry) {
 }
 
 // WriteDiskConfig implements the [Interface] interface for *StatsCtx.
-func (s *StatsCtx) WriteDiskConfig(dc *Config) {
+func (s *StatsCtx) WriteDiskConfig(dc *configmgr.StatsConfig) {
 	s.confMu.RLock()
 	defer s.confMu.RUnlock()
 
-	dc.Ignored = s.ignored
-	dc.Limit = s.limit
 	dc.Enabled = s.enabled
+	dc.Ignored = s.ignored.Values()
+	dc.IgnoredEnabled = s.ignored.IsEnabled()
+	dc.Interval = timeutil.Duration(s.limit)
 }
 
 // TopClientsIP implements the [Interface] interface for *StatsCtx.
@@ -499,26 +496,6 @@ func (s *StatsCtx) periodicFlush() {
 	}
 
 	s.logger.Debug("periodic flushing finished")
-}
-
-// setLimit sets the limit.  s.lock is expected to be locked.
-//
-// TODO(s.chzhen):  Remove it when migration to the new API is over.
-func (s *StatsCtx) setLimit(limit time.Duration) {
-	if limit != 0 {
-		s.enabled = true
-		s.limit = limit
-		s.logger.Debug("setting limit in days", "num", limit/timeutil.Day)
-
-		return
-	}
-
-	s.enabled = false
-	s.logger.Debug("disabled")
-
-	if err := s.clear(); err != nil {
-		s.logger.Error("clearing", slogutil.KeyError, err)
-	}
 }
 
 // Reset counters and clear database

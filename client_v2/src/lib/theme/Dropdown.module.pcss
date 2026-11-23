@@ -3,13 +3,14 @@
 }
 
 .menu {
-    padding: 8px 0;
     font-size: 14px;
     line-height: 21px;
     font-weight: var(--weight-regular);
     color: var(--default-main-text);
     border-radius: 8px;
-    box-shadow: var(--main-box-shadow);
+    box-shadow:
+        0 8px 18px -6px var(--dropdown-box-shadow),
+        0 12px 42px -4px var(--dropdown-box-shadow);
     background-color: var(--default-dropdown-menu-background);
     max-width: 281px;
     cursor: default;
@@ -21,7 +22,6 @@
 
         @media (min-width: 1024px) {
             column-count: 3;
-            padding: 8px;
             max-height: none;
             overflow: visible;
             min-width: 400px;
@@ -82,4 +82,39 @@
     &_large {
         padding: 16px;
     }
+}
+
+.trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    background: none;
+    border: 0;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: var(--t2) background-color;
+    color: var(--default-gray-icons);
+
+    &:hover,
+    &:focus {
+        background: var(--hovered-secondary-button);
+    }
+
+    &:active {
+        background: var(--pressed-secondary-button);
+    }
+
+    &:disabled {
+        background: var(--disabled-secondary-button);
+        color: var(--disabled-secondary-button-stroke);
+        cursor: default;
+    }
+}
+
+.trigger_offset {
+    position: relative;
+    top: 2px;
 }

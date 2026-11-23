@@ -5,24 +5,24 @@ import intl from 'panel/common/intl';
 import { Checkbox } from 'panel/common/controls/Checkbox';
 import { PRIVACY_POLICY_LINK, TERMS_LINK } from 'panel/helpers/constants';
 import cn from 'clsx';
-import { PasswordRequirements } from 'panel/install/Setup/blocks';
+import { PasswordRequirements, type PasswordRequirementsState } from 'panel/install/Setup/blocks';
 import { PasswordInput } from '../../common/controls/Input/PasswordInput';
 import { Controls } from './Controls';
-import { validatePasswordLength, validateRequiredValue } from '../../helpers/validators';
 import {
-    hasMinLength,
-    hasLowercase,
-    hasUppercase,
-    hasAllowedAsciiOnly,
-    hasNumberOrSpecial,
-} from './helpers/helpers';
+    hasPasswordMinLength,
+    validatePasswordLength,
+    validateRequiredValue,
+} from '../../helpers/validators';
+import { hasLowercase, hasUppercase } from './helpers/helpers';
 import styles from './styles.module.pcss';
 
 const validateRequiredString = (value: string | undefined) => validateRequiredValue(value);
 const validateRequiredBoolean = (value: boolean | undefined) => validateRequiredValue(value);
 const validatePasswordLengthMsg = (value: string | undefined) => {
-    const result = validatePasswordLength(value);
-    return result === true ? intl.getMessage('password_requirements_characters') : result;
+    const error = validatePasswordLength(value);
+
+    // An over-long password only keeps Next disabled; it needs no message.
+    return error === 'too_short' ? intl.getMessage('password_requirements_characters') : undefined;
 };
 
 export type AuthFormValues = {
@@ -54,6 +54,7 @@ export const Auth = (props: Props) => {
         validateOn: 'change',
     });
 
+    const username = () => (getValue(authForm, 'username') as string) ?? '';
     const password = () => (getValue(authForm, 'password') as string) ?? '';
     const confirmPassword = () => (getValue(authForm, 'confirm_password') as string) ?? '';
 
@@ -78,19 +79,11 @@ export const Auth = (props: Props) => {
         return undefined;
     };
 
-    const validatePasswordSpecial = (value: string) => {
-        if (value && !(hasAllowedAsciiOnly(value) && hasNumberOrSpecial(value))) {
-            return intl.getMessage('password_requirements_special');
-        }
-        return undefined;
-    };
-
-    const requirements = createMemo(() => {
+    const requirements = createMemo((): PasswordRequirementsState => {
         const pwd = password();
         const confirmPwd = confirmPassword();
         return {
-            minLength: pwd.length > 0 && hasMinLength(pwd),
-            allowedChars: pwd.length > 0 && hasAllowedAsciiOnly(pwd) && hasNumberOrSpecial(pwd),
+            minLength: pwd.length > 0 && hasPasswordMinLength(pwd),
             lowercase: pwd.length > 0 && hasLowercase(pwd),
             uppercase: pwd.length > 0 && hasUppercase(pwd),
             match: pwd.length > 0 && confirmPwd.length > 0 && pwd === confirmPwd,
@@ -101,9 +94,30 @@ export const Auth = (props: Props) => {
         Boolean(getValue(authForm, 'privacy_consent') as boolean | undefined),
     );
 
+    const isAuthFormValid = createMemo(() => {
+        const requirementsMet = requirements();
+
+        return (
+            validateRequiredValue(username()) === undefined &&
+            validatePasswordLength(password()) === undefined &&
+            requirementsMet.minLength &&
+            requirementsMet.lowercase &&
+            requirementsMet.uppercase &&
+            requirementsMet.match &&
+            isPrivacyValid()
+        );
+    });
+
     return (
         <div class={styles.configSetting}>
-            <Form class={styles.step} onSubmit={props.onAuthSubmit}>
+            <Form
+                class={styles.step}
+                onSubmit={(values) => {
+                    if (isAuthFormValid()) {
+                        props.onAuthSubmit(values);
+                    }
+                }}
+            >
                 <div class={styles.info}>
                     <div class={styles.titleStep}>{intl.getMessage('setup_guide_auth_title')}</div>
 
@@ -135,7 +149,6 @@ export const Auth = (props: Props) => {
                                 validatePasswordLengthMsg,
                                 validatePasswordLowercase,
                                 validatePasswordUppercase,
-                                validatePasswordSpecial,
                             ]}
                         >
                             {(field, props) => (
@@ -227,7 +240,7 @@ export const Auth = (props: Props) => {
                         </Field>
                     </div>
 
-                    <Controls isDirty={authForm.dirty} isValid={isPrivacyValid()} />
+                    <Controls isDirty={authForm.dirty} isValid={isAuthFormValid()} />
                 </div>
 
                 <div class={styles.content}>

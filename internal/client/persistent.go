@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"slices"
 	"strings"
+	"uuid"
 
 	"github.com/AdguardTeam/AdGuardHome/internal/aghslog"
 	"github.com/AdguardTeam/AdGuardHome/internal/filtering"
@@ -16,28 +17,14 @@ import (
 	"github.com/AdguardTeam/dnsproxy/upstream"
 	"github.com/AdguardTeam/golibs/errors"
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
-	"github.com/google/uuid"
 )
 
 // UID is the type for the unique IDs of persistent clients.
 type UID uuid.UUID
 
-// NewUID returns a new persistent client UID.  Any error returned is an error
-// from the cryptographic randomness reader.
-func NewUID() (uid UID, err error) {
-	uuidv7, err := uuid.NewV7()
-
-	return UID(uuidv7), err
-}
-
-// MustNewUID is a wrapper around [NewUID] that panics if there is an error.
-func MustNewUID() (uid UID) {
-	uid, err := NewUID()
-	if err != nil {
-		panic(fmt.Errorf("unexpected uuidv7 error: %w", err))
-	}
-
-	return uid
+// NewUID returns a new persistent client UID.
+func NewUID() (uid UID) {
+	return UID(uuid.NewV7())
 }
 
 // type check
@@ -64,6 +51,10 @@ type Persistent struct {
 	// BlockedServices is the configuration of blocked services of a client.  It
 	// must not be nil after initialization.
 	BlockedServices *filtering.BlockedServices
+
+	// SafeSearchConf is the safe search filtering configuration.  It must not
+	// be nil.
+	SafeSearchConf *filtering.SafeSearchConfig
 
 	// Name of the persistent client.  Must not be empty.
 	Name string
@@ -124,22 +115,22 @@ type Persistent struct {
 
 	// IgnoreStatistics  specifies whether the client requests are counted.
 	IgnoreStatistics bool
-
-	// SafeSearchConf is the safe search filtering configuration.
-	//
-	// TODO(d.kolyshev): Make SafeSearchConf a pointer.
-	SafeSearchConf filtering.SafeSearchConfig
 }
 
 // validate returns an error if persistent client information contains errors.
-// allTags must be sorted.
-func (c *Persistent) validate(ctx context.Context, l *slog.Logger, allTags []string) (err error) {
+// l must not be nil.  allTags must be sorted.
+func (c *Persistent) validate(
+	ctx context.Context,
+	l *slog.Logger,
+	allTags []string,
+	requireUID bool,
+) (err error) {
 	switch {
 	case c.Name == "":
 		return errors.Error("empty name")
 	case c.idendifiersLen() == 0:
 		return errors.Error("id required")
-	case c.UID == UID{}:
+	case c.UID == UID{} && requireUID:
 		return errors.Error("uid required")
 	}
 
@@ -171,10 +162,10 @@ func (c *Persistent) validate(ctx context.Context, l *slog.Logger, allTags []str
 // SetIDs parses a list of strings into typed fields and returns an error if
 // there is one.
 func (c *Persistent) SetIDs(ids []string) (err error) {
-	for _, id := range ids {
+	for i, id := range ids {
 		err = c.setID(id)
 		if err != nil {
-			return err
+			return fmt.Errorf("setting id: at index %d: %w", i, err)
 		}
 	}
 
@@ -214,7 +205,7 @@ func subnetCompare(x, y netip.Prefix) (cmp int) {
 // setID parses id into typed field if there is no error.
 func (c *Persistent) setID(id string) (err error) {
 	if id == "" {
-		return errors.Error("clientid is empty")
+		return fmt.Errorf("id: %w", errors.ErrEmptyValue)
 	}
 
 	var ip netip.Addr

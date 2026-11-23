@@ -1,6 +1,7 @@
 package hashprefix
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"slices"
@@ -9,12 +10,14 @@ import (
 	"time"
 
 	"github.com/AdguardTeam/AdGuardHome/internal/aghtest"
-	"github.com/AdguardTeam/golibs/cache"
 	"github.com/AdguardTeam/golibs/logutil/slogutil"
 	"github.com/AdguardTeam/golibs/testutil"
 	"github.com/miekg/dns"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	//lint:ignore SA1019 TODO(f.setrakov): Use bytecache instead.
+	"github.com/AdguardTeam/golibs/cache"
 )
 
 const (
@@ -208,10 +211,10 @@ func TestChecker_Check(t *testing.T) {
 
 		var numReq int
 		onExchange := ups.OnExchange
-		ups.OnExchange = func(req *dns.Msg) (resp *dns.Msg, err error) {
+		ups.OnExchange = func(ctx context.Context, req *dns.Msg) (resp *dns.Msg, err error) {
 			numReq++
 
-			return onExchange(req)
+			return onExchange(ctx, req)
 		}
 
 		c.upstream = ups

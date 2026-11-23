@@ -10,6 +10,8 @@ type InputChangeEvent = Event & {
     target: HTMLInputElement;
 };
 
+export const INPUT_SIZES = ['small', 'medium', 'large'] as const;
+
 type Props = Omit<JSX.InputHTMLAttributes<HTMLInputElement>, 'size' | 'onChange' | 'onBlur'> & {
     label?: JSX.Element;
     class?: string;
@@ -18,19 +20,21 @@ type Props = Omit<JSX.InputHTMLAttributes<HTMLInputElement>, 'size' | 'onChange'
     suffixIcon?: JSX.Element;
     borderless?: boolean;
     invalid?: boolean;
+    onCard?: boolean;
     maxLength?: number;
     error?: boolean;
     errorMessage?: string;
     isClearable?: boolean;
     onClear?: () => void;
     inputError?: string;
-    size?: 'small' | 'medium' | 'large';
+    size?: (typeof INPUT_SIZES)[number];
     value?: string | number | readonly string[];
     defaultValue?: string;
     onChange?: (event: InputChangeEvent) => void;
     onBlur?: (event: FocusEvent) => void;
     ref?: HTMLInputElement | ((el: HTMLInputElement) => void);
     onKeyDown?: (e: KeyboardEvent) => void;
+    'data-testid'?: string;
 };
 
 const hasInputValue = (value: string | number | readonly string[] | undefined) => {
@@ -118,6 +122,7 @@ export const Input = (props: Props) => {
                         [s.prefix]: props.prefixIcon,
                         [s.suffix]: hasActions(),
                         [s.invalid]: props.invalid,
+                        [s.onCard]: props.onCard,
                         [s.focused]: focused(),
                         [s.disabled]: props.disabled,
                         [s.error]: props.error || !!computedErrorMessage(),
@@ -134,7 +139,12 @@ export const Input = (props: Props) => {
                         [s.postfix]: hasActions(),
                     })}
                     onChange={handleChange}
-                    onInput={(e) => (props.onInput as any)?.(e)}
+                    onInput={(e) => {
+                        // Reveal the clear button as soon as there is text; the
+                        // parent still only learns the value on `change`.
+                        setHasValue((e.currentTarget as HTMLInputElement).value.length > 0);
+                        (props.onInput as any)?.(e);
+                    }}
                     onKeyDown={handleKeyDown}
                     type={props.type}
                     id={props.id}
@@ -149,6 +159,7 @@ export const Input = (props: Props) => {
                     maxLength={props.maxLength}
                     disabled={props.disabled}
                     autocomplete={props.autocomplete}
+                    data-testid={props['data-testid']}
                 />
                 <Show when={hasActions()}>
                     <div class={s.actions}>
@@ -171,7 +182,12 @@ export const Input = (props: Props) => {
                 </Show>
             </div>
             <Show when={computedErrorMessage()}>
-                <div class={s.inputError}>{computedErrorMessage()}</div>
+                <div
+                    class={s.inputError}
+                    data-testid={props['data-testid'] ? `${props['data-testid']}-error` : undefined}
+                >
+                    {computedErrorMessage()}
+                </div>
             </Show>
         </>
     );

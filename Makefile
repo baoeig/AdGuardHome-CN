@@ -22,12 +22,11 @@ CHANNEL = development
 # TODO(ik): Update CLIENT_DIR to client_v2 for new frontend migration
 CLIENT_DIR = client
 CLIENT_V2_DIR = client_v2
-DEPLOY_SCRIPT_PATH = not/a/real/path
 DIST_DIR = dist
 GOAMD64 = v1
 GOPROXY = https://proxy.golang.org|direct
 GOTELEMETRY = off
-GOTOOLCHAIN = go1.26.6
+GOTOOLCHAIN = go1.27.4
 GPG_KEY = devteam@adguard.com
 GPG_KEY_PASSPHRASE = not-a-real-password
 NPM = npm
@@ -38,10 +37,7 @@ NPM_INSTALL_FLAGS_V2 = $(NPM_FLAGS_V2) --quiet --no-progress
 RACE = 0
 REVISION = $${REVISION:-$$(git rev-parse --short HEAD)}
 SIGN = 1
-SIGNER_API_KEY = not-a-real-key
 VERSION = v0.0.0
-
-NEXTAPI = 0
 
 # Macros for the build-release target.  If FRONTEND_PREBUILT is 0, the default,
 # the macro $(BUILD_RELEASE_DEPS_$(FRONTEND_PREBUILT)) expands into
@@ -60,7 +56,6 @@ BUILD_RELEASE_DEPS_1 = go-deps
 # needed.
 ENV = env \
 	CHANNEL='$(CHANNEL)' \
-	DEPLOY_SCRIPT_PATH='$(DEPLOY_SCRIPT_PATH)' \
 	DIST_DIR='$(DIST_DIR)' \
 	GO="$(GO.MACRO)" \
 	GOAMD64='$(GOAMD64)' \
@@ -69,12 +64,10 @@ ENV = env \
 	GOTOOLCHAIN='$(GOTOOLCHAIN)' \
 	GPG_KEY='$(GPG_KEY)' \
 	GPG_KEY_PASSPHRASE='$(GPG_KEY_PASSPHRASE)' \
-	NEXTAPI='$(NEXTAPI)' \
 	PATH="$${PWD}/bin:$$("$(GO.MACRO)" env GOPATH)/bin:$${PATH}" \
 	RACE='$(RACE)' \
 	REVISION="$(REVISION)" \
 	SIGN='$(SIGN)' \
-	SIGNER_API_KEY='$(SIGNER_API_KEY)' \
 	VERBOSE="$(VERBOSE.MACRO)" \
 	VERSION="$(VERSION)" \
 
@@ -106,21 +99,27 @@ test: js-test go-test
 .PHONY: build-docker
 build-docker: ; $(ENV) "$(SHELL)" ./scripts/make/build-docker.sh
 
-.PHONY: build-release
-build-release: $(BUILD_RELEASE_DEPS_$(FRONTEND_PREBUILT))
-	$(ENV) "$(SHELL)" ./scripts/make/build-release.sh
+# Default the fork's release to Linux amd64. Allow explicit platform overrides.
+RELEASE_ENV = $(ENV) ARCH="$${ARCH-amd64}" OS="$${OS-linux}"
 
-.PHONY: js-build js-deps js-typecheck js-lint js-test js-test-e2e
+.PHONY: build-release pack-release
+build-release: $(BUILD_RELEASE_DEPS_$(FRONTEND_PREBUILT))
+	$(RELEASE_ENV) "$(SHELL)" ./scripts/make/build-release.sh
+pack-release:  ; $(RELEASE_ENV) "$(SHELL)" ./scripts/make/pack-release.sh
+
+.PHONY: js-build js-deps js-typecheck js-lint js-storybook js-storybook-build js-test js-test-e2e
 js-build:
 	$(NPM) $(NPM_FLAGS) run build-prod
 	$(NPM) $(NPM_FLAGS_V2) run build-preview
 js-deps:
 	$(NPM) $(NPM_INSTALL_FLAGS) ci
 	$(NPM) $(NPM_INSTALL_FLAGS_V2) ci
-js-typecheck: ; $(NPM) $(NPM_FLAGS) run typecheck
-js-lint:      ; $(NPM) $(NPM_FLAGS) run lint
-js-test:      ; $(NPM) $(NPM_FLAGS) run test
-js-test-e2e:  ; $(NPM) $(NPM_FLAGS) run test:e2e
+js-typecheck:       ; $(NPM) $(NPM_FLAGS) run typecheck
+js-lint:            ; $(NPM) $(NPM_FLAGS) run lint
+js-storybook:       ; $(NPM) $(NPM_FLAGS_V2) run storybook
+js-storybook-build: ; $(NPM) $(NPM_FLAGS_V2) run build-storybook
+js-test:            ; $(NPM) $(NPM_FLAGS) run test
+js-test-e2e:        ; $(NPM) $(NPM_FLAGS) run test:e2e
 
 # TODO(a.garipov): Think about making RACE='1' the default for all targets.
 .PHONY: go-bench go-build go-deps go-env go-fuzz go-lint go-test go-upd-tools
