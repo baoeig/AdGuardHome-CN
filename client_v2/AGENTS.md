@@ -96,6 +96,7 @@ client_v2/
 │   │   └── styles/                # Theme tokens (vars.css, colors/light|dark|adg.css)
 │   ├── components/                # Feature/page components (Dashboard, Clients, QueryLog, …)
 │   │   ├── App/                   # Root component — HashRouter + layout + <Route>s
+│   │   ├── GfwList/               # GFW list routing and custom domains
 │   │   ├── Routes/Paths.ts        # Route path constants
 │   │   └── Stats/                 # Dashboard "Show more" detail pages (top clients, domains, upstreams)
 │   ├── helpers/                   # Pure utilities, validators, theme helpers

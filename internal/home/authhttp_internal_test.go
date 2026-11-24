@@ -320,10 +320,6 @@ func TestAuthMiddlewareDefault_public(t *testing.T) {
 		name:     "no_auth",
 		wantCode: http.StatusFound,
 	}, {
-		req:      httptest.NewRequest(http.MethodGet, "/legacy.html", nil),
-		name:     "no_auth_legacy",
-		wantCode: http.StatusFound,
-	}, {
 		req:      httptest.NewRequest(http.MethodGet, "/control/login", nil),
 		name:     "public_login",
 		wantCode: http.StatusOK,

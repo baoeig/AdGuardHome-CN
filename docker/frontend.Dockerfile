@@ -40,7 +40,6 @@ FROM "$BASE_IMAGE" AS dependencies
 ADD Makefile /app/
 ADD scripts /app/scripts
 ARG CLIENT_DIR
-ADD client /app/client
 ADD "${CLIENT_DIR}" "/app/${CLIENT_DIR}"
 WORKDIR /app
 RUN \

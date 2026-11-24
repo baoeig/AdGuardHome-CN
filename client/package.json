@@ -5,7 +5,6 @@
   "scripts": {
     "build-dev": "cross-env NODE_ENV=development BUILD_ENV=dev webpack --config webpack.dev.js",
     "build-prod": "cross-env BUILD_ENV=prod webpack --config webpack.prod.js",
-    "build-legacy": "cross-env BUILD_ENV=prod CLIENT_LEGACY_BUILD=1 webpack --config webpack.prod.js",
     "watch": "cross-env BUILD_ENV=dev webpack --config webpack.dev.js --watch",
     "watch:hot": "cross-env BUILD_ENV=dev webpack-dev-server --config webpack.dev.js",
     "lint": "eslint --ext .ts,.tsx src",

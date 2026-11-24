@@ -1,0 +1,33 @@
+.card {
+    display: grid;
+    gap: 16px;
+    margin: 16px;
+    padding: 20px;
+    border-radius: 12px;
+    background: var(--default-cards-background);
+}
+
+.card p {
+    margin: 0;
+}
+
+.actions,
+.domain {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.domains {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.domain {
+    justify-content: space-between;
+    padding: 8px 0;
+    border-top: 1px solid var(--default-item-divider);
+    overflow-wrap: anywhere;
+}

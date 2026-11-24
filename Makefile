@@ -104,12 +104,8 @@ build-release: $(BUILD_RELEASE_DEPS_$(FRONTEND_PREBUILT))
 pack-release:  ; $(RELEASE_ENV) "$(SHELL)" ./scripts/make/pack-release.sh
 
 .PHONY: js-build js-deps js-typecheck js-lint js-storybook js-storybook-build js-test js-test-e2e
-js-build:
-	$(NPM) $(NPM_FLAGS) run build-prod
-	if [ '$(CLIENT_DIR)' = 'client_v2' ]; then $(NPM) --prefix client run build-legacy; fi
-js-deps:
-	$(NPM) $(NPM_INSTALL_FLAGS) ci
-	if [ '$(CLIENT_DIR)' = 'client_v2' ]; then $(NPM) --prefix client --quiet --no-progress ci; fi
+js-build:           ; $(NPM) $(NPM_FLAGS) run build-prod
+js-deps:            ; $(NPM) $(NPM_INSTALL_FLAGS) ci
 js-typecheck:       ; $(NPM) $(NPM_FLAGS) run typecheck
 js-lint:            ; $(NPM) $(NPM_FLAGS) run lint
 js-storybook:       ; $(NPM) $(NPM_FLAGS) run storybook

@@ -17,6 +17,7 @@ import { DNSRewrites } from 'panel/components/FilterLists/DNSRewrites';
 import { SetupGuide } from 'panel/components/SetupGuide';
 import { Dashboard } from 'panel/components/Dashboard';
 import { Dhcp } from 'panel/components/Dhcp';
+import { GfwList } from 'panel/components/GfwList';
 import { LeasesPage } from 'panel/components/Dhcp/LeasesPage';
 import { QueryLog } from 'panel/components/QueryLog';
 import { Toasts } from 'panel/components/Toasts';
@@ -57,10 +58,6 @@ const ClientScheduleRoute = () => <ClientSchedule />;
 const ClientBlockedServicesRoute = () => <ClientBlockedServices />;
 const ProtectionRoute = () => <Protection />;
 const AddClientRoute = () => <AddClient />;
-const GfwListRoute = (): null => {
-    onMount(() => window.location.replace('legacy.html#gfwlist'));
-    return null;
-};
 
 const App = () => {
     onMount(() => {
@@ -197,7 +194,7 @@ const App = () => {
             <Route path={Paths.DnsBlocklists} component={Blocklists} />
             <Route path={Paths.DnsAllowlists} component={Allowlists} />
             <Route path={Paths.CustomRules} component={UserRules} />
-            <Route path={Paths.GfwList} component={GfwListRoute} />
+            <Route path={Paths.GfwList} component={GfwList} />
             <Route path={Paths.DnsRewrites} component={DNSRewrites} />
             <Route path={Paths.Dhcp} component={Dhcp} />
             <Route path={Paths.DhcpLeases} component={LeasesPage} />

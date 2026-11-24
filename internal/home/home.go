@@ -704,11 +704,6 @@ func newWeb(ctx context.Context, conf *webConfig) (web *webAPI, err error) {
 		}
 	}
 
-	legacyFS, err := legacyFrontendFS(conf.opts.localFrontend, conf.clientBuildFS)
-	if err != nil {
-		logger.DebugContext(ctx, "legacy frontend is unavailable", slogutil.KeyError, err)
-	}
-
 	disableUpdate := !isUpdateEnabled(ctx, conf.baseLogger, &conf.opts, conf.isCustomUpdURL)
 
 	webConf := &webAPIConfig{
@@ -724,7 +719,6 @@ func newWeb(ctx context.Context, conf *webConfig) (web *webAPI, err error) {
 		hostsContainer:     conf.hostsContainer,
 
 		clientFS: clientFS,
-		legacyFS: legacyFS,
 
 		BindAddr: config.HTTPConfig.Address,
 
@@ -750,31 +744,6 @@ func newWeb(ctx context.Context, conf *webConfig) (web *webAPI, err error) {
 	}
 
 	return web, nil
-}
-
-// legacyFrontendFS returns the optional filesystem for the classic frontend.
-func legacyFrontendFS(localFrontend bool, clientBuildFS fs.FS) (legacyFS fs.FS, err error) {
-	const legacySubdir = "build/legacy"
-
-	if localFrontend {
-		legacyFS = os.DirFS(legacySubdir)
-	} else {
-		if clientBuildFS == nil {
-			return nil, errors.Error("embedded frontend filesystem is nil")
-		}
-
-		legacyFS, err = fs.Sub(clientBuildFS, legacySubdir)
-		if err != nil {
-			return nil, fmt.Errorf("getting embedded legacy frontend subdir: %w", err)
-		}
-	}
-
-	_, err = fs.Stat(legacyFS, "index.html")
-	if err != nil {
-		return nil, fmt.Errorf("checking legacy frontend index: %w", err)
-	}
-
-	return legacyFS, nil
 }
 
 // suggestedWebPort returns the suggested default HTTP port for the installation

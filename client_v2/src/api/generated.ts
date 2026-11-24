@@ -6,6 +6,7 @@ import type {
     BlockedServicesSchedule,
     CheckConfigRequest,
     CheckConfigResponse,
+    CheckGfwListDomainParams,
     Client,
     ClientDelete,
     ClientUpdate,
@@ -27,9 +28,16 @@ import type {
     FilterSetUrl,
     FilterStatus,
     FilteringCheckHostParams,
+    GetGfwListStatusParams,
     GetQueryLogConfigResponse,
     GetStatsConfigResponse,
     GetVersionRequest,
+    GfwListCheckResult,
+    GfwListConfig,
+    GfwListDomainsRequest,
+    GfwListDomainsResult,
+    GfwListStatus,
+    GfwListUpdate,
     InitialConfiguration,
     Login,
     MobileConfigDoHParams,
@@ -59,6 +67,135 @@ import type {
 } from './model';
 
 import { customFetch } from './customFetch';
+export const getGetGfwListStatusUrl = (params?: GetGfwListStatusParams) => {
+    const normalizedParams = new URLSearchParams();
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : String(value));
+        }
+    });
+
+    const stringifiedParams = normalizedParams.toString();
+
+    return stringifiedParams.length > 0
+        ? `control/gfwlist/status?${stringifiedParams}`
+        : `control/gfwlist/status`;
+};
+
+/**
+ * @summary Get GFW list settings and custom domains
+ */
+export const getGfwListStatus = async (
+    params?: GetGfwListStatusParams,
+    options?: RequestInit,
+): Promise<GfwListStatus> => {
+    return customFetch<GfwListStatus>(getGetGfwListStatusUrl(params), {
+        ...options,
+        method: 'GET',
+    });
+};
+
+export const getSetGfwListConfigUrl = () => {
+    return `control/gfwlist/config`;
+};
+
+/**
+ * @summary Save GFW list settings
+ */
+export const setGfwListConfig = async (
+    gfwListConfig: GfwListConfig,
+    options?: RequestInit,
+): Promise<void> => {
+    return customFetch<void>(getSetGfwListConfigUrl(), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(gfwListConfig),
+    });
+};
+
+export const getUpdateGfwListUrl = () => {
+    return `control/gfwlist/update`;
+};
+
+/**
+ * @summary Download and apply the GFW list
+ */
+export const updateGfwList = async (options?: RequestInit): Promise<GfwListUpdate> => {
+    return customFetch<GfwListUpdate>(getUpdateGfwListUrl(), {
+        ...options,
+        method: 'POST',
+    });
+};
+
+export const getAddGfwListDomainsUrl = () => {
+    return `control/gfwlist/domains/add`;
+};
+
+/**
+ * @summary Add custom GFW list domains
+ */
+export const addGfwListDomains = async (
+    gfwListDomainsRequest: GfwListDomainsRequest,
+    options?: RequestInit,
+): Promise<GfwListDomainsResult> => {
+    return customFetch<GfwListDomainsResult>(getAddGfwListDomainsUrl(), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(gfwListDomainsRequest),
+    });
+};
+
+export const getRemoveGfwListDomainsUrl = () => {
+    return `control/gfwlist/domains/remove`;
+};
+
+/**
+ * @summary Remove custom GFW list domains
+ */
+export const removeGfwListDomains = async (
+    gfwListDomainsRequest: GfwListDomainsRequest,
+    options?: RequestInit,
+): Promise<GfwListDomainsResult> => {
+    return customFetch<GfwListDomainsResult>(getRemoveGfwListDomainsUrl(), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(gfwListDomainsRequest),
+    });
+};
+
+export const getCheckGfwListDomainUrl = (params: CheckGfwListDomainParams) => {
+    const normalizedParams = new URLSearchParams();
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : String(value));
+        }
+    });
+
+    const stringifiedParams = normalizedParams.toString();
+
+    return stringifiedParams.length > 0
+        ? `control/gfwlist/check?${stringifiedParams}`
+        : `control/gfwlist/check`;
+};
+
+/**
+ * @summary Check whether a domain uses GFW list routing
+ */
+export const checkGfwListDomain = async (
+    params: CheckGfwListDomainParams,
+    options?: RequestInit,
+): Promise<GfwListCheckResult> => {
+    return customFetch<GfwListCheckResult>(getCheckGfwListDomainUrl(params), {
+        ...options,
+        method: 'GET',
+    });
+};
+
 export const getStatusUrl = () => {
     return `control/status`;
 };

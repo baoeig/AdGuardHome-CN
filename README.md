@@ -75,8 +75,7 @@ It operates as a DNS server that re-routes tracking domains to a “black hole�
 
 ## <a href="#getting-started" id="getting-started" name="getting-started">Getting Started</a>
 
-The main address opens the current AdGuard Home interface. Select **Filters →
-GFW List** to manage split DNS routing in the classic interface.
+Select **Filters → GFW List** to manage split DNS routing.
 
 ### <a href="#automated-install-linux-and-mac" id="automated-install-linux-and-mac" name="automated-install-linux-and-mac">Automated install (Linux/Unix/MacOS/FreeBSD/OpenBSD)</a>
 

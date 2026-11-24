@@ -46,6 +46,115 @@
   'description': 'AdGuard Home HTTPS/DoH/DoQ/DoT settings'
 
 'paths':
+  '/gfwlist/status':
+    'get':
+      'tags':
+      - 'filtering'
+      'operationId': 'getGfwListStatus'
+      'summary': 'Get GFW list settings and custom domains'
+      'parameters':
+      - 'name': 'custom_domain_page'
+        'in': 'query'
+        'schema':
+          'type': 'integer'
+      - 'name': 'custom_domain_page_size'
+        'in': 'query'
+        'schema':
+          'type': 'integer'
+      'responses':
+        '200':
+          'description': 'OK'
+          'content':
+            'application/json':
+              'schema':
+                '$ref': '#/components/schemas/GfwListStatus'
+  '/gfwlist/config':
+    'post':
+      'tags':
+      - 'filtering'
+      'operationId': 'setGfwListConfig'
+      'summary': 'Save GFW list settings'
+      'requestBody':
+        'required': true
+        'content':
+          'application/json':
+            'schema':
+              '$ref': '#/components/schemas/GfwListConfig'
+      'responses':
+        '200':
+          'description': 'OK'
+  '/gfwlist/update':
+    'post':
+      'tags':
+      - 'filtering'
+      'operationId': 'updateGfwList'
+      'summary': 'Download and apply the GFW list'
+      'responses':
+        '200':
+          'description': 'OK'
+          'content':
+            'application/json':
+              'schema':
+                '$ref': '#/components/schemas/GfwListUpdate'
+        '409':
+          'description': 'Another GFW list update is in progress'
+  '/gfwlist/domains/add':
+    'post':
+      'tags':
+      - 'filtering'
+      'operationId': 'addGfwListDomains'
+      'summary': 'Add custom GFW list domains'
+      'requestBody':
+        'required': true
+        'content':
+          'application/json':
+            'schema':
+              '$ref': '#/components/schemas/GfwListDomainsRequest'
+      'responses':
+        '200':
+          'description': 'OK'
+          'content':
+            'application/json':
+              'schema':
+                '$ref': '#/components/schemas/GfwListDomainsResult'
+  '/gfwlist/domains/remove':
+    'post':
+      'tags':
+      - 'filtering'
+      'operationId': 'removeGfwListDomains'
+      'summary': 'Remove custom GFW list domains'
+      'requestBody':
+        'required': true
+        'content':
+          'application/json':
+            'schema':
+              '$ref': '#/components/schemas/GfwListDomainsRequest'
+      'responses':
+        '200':
+          'description': 'OK'
+          'content':
+            'application/json':
+              'schema':
+                '$ref': '#/components/schemas/GfwListDomainsResult'
+  '/gfwlist/check':
+    'get':
+      'tags':
+      - 'filtering'
+      'operationId': 'checkGfwListDomain'
+      'summary': 'Check whether a domain uses GFW list routing'
+      'parameters':
+      - 'name': 'domain'
+        'in': 'query'
+        'required': true
+        'schema':
+          'type': 'string'
+      'responses':
+        '200':
+          'description': 'OK'
+          'content':
+            'application/json':
+              'schema':
+                '$ref': '#/components/schemas/GfwListCheckResult'
   '/status':
     'get':
       'tags':
@@ -1259,6 +1368,91 @@
             '$ref': '#/components/schemas/RewriteUpdate'
       'required': true
   'schemas':
+    'GfwListConfig':
+      'type': 'object'
+      'properties':
+        'enabled':
+          'type': 'boolean'
+        'url':
+          'type': 'string'
+        'upstream_dns':
+          'type': ['array', 'null']
+          'items':
+            'type': 'string'
+        'update_interval':
+          'type': 'integer'
+    'GfwListStatus':
+      'type': 'object'
+      'required':
+      - 'enabled'
+      - 'url'
+      - 'upstream_dns'
+      - 'update_interval'
+      - 'domain_count'
+      - 'custom_domains'
+      - 'custom_domains_total'
+      - 'custom_domain_page'
+      'properties':
+        'enabled':
+          'type': 'boolean'
+        'url':
+          'type': 'string'
+        'upstream_dns':
+          'type': ['array', 'null']
+          'items':
+            'type': 'string'
+        'update_interval':
+          'type': 'integer'
+        'domain_count':
+          'type': 'integer'
+        'custom_domains':
+          'type': ['array', 'null']
+          'items':
+            'type': 'string'
+        'custom_domains_total':
+          'type': 'integer'
+        'custom_domain_page':
+          'type': 'integer'
+    'GfwListUpdate':
+      'type': 'object'
+      'required':
+      - 'domain_count'
+      'properties':
+        'domain_count':
+          'type': 'integer'
+    'GfwListDomainsRequest':
+      'type': 'object'
+      'required':
+      - 'domains'
+      'properties':
+        'domains':
+          'type': 'array'
+          'items':
+            'type': 'string'
+    'GfwListDomainsResult':
+      'type': 'object'
+      'required':
+      - 'custom_domains_total'
+      'properties':
+        'added_count':
+          'type': 'integer'
+        'removed_count':
+          'type': 'integer'
+        'custom_domains_total':
+          'type': 'integer'
+    'GfwListCheckResult':
+      'type': 'object'
+      'required':
+      - 'domain'
+      - 'matched'
+      - 'source'
+      'properties':
+        'domain':
+          'type': 'string'
+        'matched':
+          'type': 'boolean'
+        'source':
+          'type': 'string'
     'FilteringReason':
       'type': 'string'
       'description': 'Request filtering status.'

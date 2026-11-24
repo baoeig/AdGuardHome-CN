@@ -31,7 +31,8 @@ NOTE: Add new changes BELOW THIS COMMENT.
 
 ### Changed
 
-- AdGuardHome-CN uses the new web interface at the main address. The Filters menu links to the existing GFW List management page.
+- AdGuardHome-CN uses the new web interface at the main address, including
+  the GFW List management page under Filters.
 
 - Dark theme colors in the new web interface have been aligned with the design system, including dashboard charts, notifications, dropdowns, and tooltips.
 
