@@ -11,8 +11,7 @@
     margin: 0;
 }
 
-.actions,
-.domain {
+.actions {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
@@ -26,8 +25,14 @@
 }
 
 .domain {
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
+    align-items: center;
+    gap: 8px;
     padding: 8px 0;
     border-top: 1px solid var(--default-item-divider);
+}
+
+.domain > span {
     overflow-wrap: anywhere;
 }

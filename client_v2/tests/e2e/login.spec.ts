@@ -38,10 +38,25 @@ test.describe('Login', () => {
         await page.locator('#gfwlist-save').click();
         expect((await saved).ok()).toBe(true);
 
-        const domain = 'gfw-browser.example';
+        await page.setViewportSize({ width: 360, height: 800 });
+        const domain = ['a'.repeat(63), 'b'.repeat(63), 'c'.repeat(63), 'example'].join('.');
         await page.locator('#gfwlist-new-domain').fill(`*.${domain}\nlocalhost`);
         await page.locator('#gfwlist-add-domain').click();
-        await expect(page.getByText(domain, { exact: true })).toBeVisible();
+        const domainLabel = page.getByText(domain, { exact: true });
+        const deleteButton = page.getByRole('button', {
+            name: en.gfwlist_aria_remove_domain.replace('%domain%', domain),
+        });
+        await expect(domainLabel).toBeVisible();
+        await expect(deleteButton).toBeVisible();
+
+        const [labelBox, buttonBox] = await Promise.all([
+            domainLabel.boundingBox(),
+            deleteButton.boundingBox(),
+        ]);
+        if (!labelBox || !buttonBox) throw new Error('Missing domain row layout');
+        expect(buttonBox.x).toBeGreaterThan(labelBox.x + labelBox.width);
+        expect(buttonBox.y).toBeLessThan(labelBox.y + labelBox.height);
+        expect(buttonBox.x + buttonBox.width).toBeLessThanOrEqual(360);
 
         await page.locator('#gfwlist-check-domain').fill(domain);
         await page.getByRole('button', { name: en.gfwlist_check_domain, exact: true }).click();
@@ -49,12 +64,8 @@ test.describe('Login', () => {
             page.getByText(en.gfwlist_check_not_matched.replace('%domain%', domain)),
         ).toBeVisible();
 
-        await page
-            .getByRole('button', {
-                name: en.gfwlist_aria_remove_domain.replace('%domain%', domain),
-            })
-            .click();
-        await expect(page.getByText(domain, { exact: true })).toHaveCount(0);
+        await deleteButton.click();
+        await expect(domainLabel).toHaveCount(0);
 
         await page.goto('/legacy.html#gfwlist');
         await expect(page).toHaveURL(/\/#\/gfwlist$/);

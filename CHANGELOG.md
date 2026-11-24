@@ -38,6 +38,8 @@ NOTE: Add new changes BELOW THIS COMMENT.
 
 ### Fixed
 
+- Long custom domains in GFW List now wrap beside their Delete buttons.
+
 - Old `/client_v2/` bookmarks now open the main interface and its login flow.
 
 - The *Top upstreams* percentages in the new web interface not adding up to 100% ([#8738]).
