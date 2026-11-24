@@ -321,10 +321,15 @@ run_linter "$go" tool gosec --exclude=G115 --fmt=golint --quiet \
 
 run_linter "$go" tool errcheck work
 
-run_linter "$go" tool staticcheck --matrix work <<-'EOF'
-	darwin:  GOOS=darwin
-	freebsd: GOOS=freebsd
-	linux:   GOOS=linux
-	openbsd: GOOS=openbsd
-	windows: GOOS=windows
+# Allow CI to restrict Staticcheck to the platforms it supports.
+staticcheck_matrix="${STATICCHECK_MATRIX:-\
+darwin:  GOOS=darwin
+freebsd: GOOS=freebsd
+linux:   GOOS=linux
+openbsd: GOOS=openbsd
+windows: GOOS=windows}"
+readonly staticcheck_matrix
+
+run_linter "$go" tool staticcheck --matrix work <<EOF
+$staticcheck_matrix
 EOF

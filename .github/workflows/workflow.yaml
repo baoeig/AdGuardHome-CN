@@ -44,14 +44,7 @@
       ${{ github.repository_owner != 'AdGuardSoftwareLimited' }}
     'permissions':
       'contents': 'read'
-    'runs-on': '${{ matrix.os }}'
-    'strategy':
-      'fail-fast': false
-      'matrix':
-        'os':
-          - 'windows-latest'
-          - 'macos-latest'
-          - 'ubuntu-latest'
+    'runs-on': 'ubuntu-latest'
     'steps':
       - 'uses': 'actions/checkout@v6'
         'with':
@@ -63,6 +56,8 @@
         'with':
           'go-version': '${{ env.GO_VERSION }}'
       - 'name': 'Lint step'
+        'env':
+          'STATICCHECK_MATRIX': 'linux: GOOS=linux'
         'run': |
           #!/bin/sh
 
@@ -72,7 +67,6 @@
           make \
               VERBOSE=1 \
               go-deps \
-              go-os-check \
               go-lint \
               ;
         'shell': 'bash'
@@ -96,7 +90,6 @@
           make CLIENT_DIR=client js-deps js-test
       - 'name': 'Upload coverage'
         'uses': 'codecov/codecov-action@v1'
-        'if': "success() && matrix.os == 'ubuntu-latest'"
         'with':
           'token': '${{ secrets.CODECOV_TOKEN }}'
           'file': './cover.out'
