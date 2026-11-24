@@ -200,20 +200,20 @@ type DNSConfig struct {
 
 // GFWListConfig is the on-disk configuration for GFW list based DNS routing.
 type GFWListConfig struct {
-	// Enabled controls whether GFW list split routing is used.
-	Enabled bool `yaml:"enabled"`
-
 	// URL is the source of the base64-encoded AutoProxy list.
 	URL string `yaml:"url"`
 
 	// UpstreamDNS lists the resolvers to use for matching domains.
 	UpstreamDNS []string `yaml:"upstream_dns"`
 
+	// CustomDomains contains additional domains for these resolvers.
+	CustomDomains []string `yaml:"custom_domains"`
+
 	// UpdateInterval is the interval between automatic list updates.
 	UpdateInterval timeutil.Duration `yaml:"update_interval"`
 
-	// CustomDomains contains additional domains for these resolvers.
-	CustomDomains []string `yaml:"custom_domains"`
+	// Enabled controls whether GFW list split routing is used.
+	Enabled bool `yaml:"enabled"`
 }
 
 // EDNSClientSubnet is the settings list for EDNS Client Subnet.
